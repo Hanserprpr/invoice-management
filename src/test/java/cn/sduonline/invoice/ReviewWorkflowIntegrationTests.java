@@ -1,0 +1,234 @@
+package cn.sduonline.invoice;
+
+import cn.sduonline.invoice.data.dto.ApplicationDtos.SaveDraftRequest;
+import cn.sduonline.invoice.data.dto.ApplicationDtos.SubmitRequest;
+import cn.sduonline.invoice.data.dto.FileDtos.InspectFileRequest;
+import cn.sduonline.invoice.data.dto.FileDtos.RegisterFileRequest;
+import cn.sduonline.invoice.data.dto.FormDtos.*;
+import cn.sduonline.invoice.data.dto.InvoiceDtos.CreateInvoiceRequest;
+import cn.sduonline.invoice.data.dto.InvoiceDtos.UpdateInvoiceRequest;
+import cn.sduonline.invoice.data.dto.OrganizationDtos.*;
+import cn.sduonline.invoice.data.dto.ProjectDtos.ChangeStateRequest;
+import cn.sduonline.invoice.data.dto.ProjectDtos.CreateProjectRequest;
+import cn.sduonline.invoice.data.dto.ReviewDtos.*;
+import cn.sduonline.invoice.data.enums.BizCode;
+import cn.sduonline.invoice.exception.BusinessException;
+import cn.sduonline.invoice.service.*;
+import cn.sduonline.invoice.tenant.TenantContext;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Set;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+@SpringBootTest(properties = {
+        "app.security.oidc.client-id=test-client-id",
+        "app.security.oidc.client-secret=test-client-secret"
+})
+@EnabledIfEnvironmentVariable(named = "MYSQL_URL", matches = ".*_test.*")
+class ReviewWorkflowIntegrationTests {
+    @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired OrganizationService organizationService;
+    @Autowired MemberService memberService;
+    @Autowired ProjectService projectService;
+    @Autowired ApplicationFormService formService;
+    @Autowired ApplicationService applicationService;
+    @Autowired FileObjectService fileService;
+    @Autowired InvoiceService invoiceService;
+    @Autowired ReviewService reviewService;
+    @Autowired ObjectMapper objectMapper;
+
+    @BeforeEach
+    void requireDedicatedTestDatabase() {
+        assertThat(jdbcTemplate.queryForObject("SELECT DATABASE()", String.class)).endsWith("_test");
+    }
+
+    @Test
+    @Transactional
+    void reviewerReturnsRestrictedFieldsThenApprovesAndBatchApproves() throws Exception {
+        String platform = "review-platform";
+        String admin = "review-admin";
+        String applicant = "review-member";
+        String reviewer = "review-reviewer";
+        String scopedReviewer = "review-scoped";
+        String ordinary = "review-ordinary";
+        jdbcTemplate.update("INSERT INTO `user`(cas_id,name,status,is_platform_admin) VALUES (?,?,?,TRUE)",
+                platform, "平台管理员", "ACTIVE");
+        var organization = organizationService.create(platform,
+                new CreateOrganizationRequest("审核闭环社团", "CLUB",
+                        new InitialAdmin(admin, "社团管理员", null, null)));
+        String projectId;
+        String formId;
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), admin)) {
+            memberService.create(organization.id(), admin,
+                    new CreateMemberRequest(applicant, "申请人", null, null));
+            memberService.create(organization.id(), admin,
+                    new CreateMemberRequest(reviewer, "审核人", null, null));
+            memberService.create(organization.id(), admin,
+                    new CreateMemberRequest(scopedReviewer, "项目审核人", null, null));
+            memberService.create(organization.id(), admin,
+                    new CreateMemberRequest(ordinary, "普通成员", null, null));
+            var project = projectService.create(admin, new CreateProjectRequest(
+                    "审核测试项目", null, null, null, false, "ALL", null, null,
+                    List.of(admin), List.of()));
+            projectId = project.id();
+            memberService.replaceRoles(organization.id(), reviewer, admin,
+                    new ReplaceRolesRequest(0L,
+                            List.of(new RoleAssignment("MEMBER", null, null),
+                                    new RoleAssignment("REVIEWER", null, null)), List.of()));
+            memberService.replaceRoles(organization.id(), scopedReviewer, admin,
+                    new ReplaceRolesRequest(0L,
+                            List.of(new RoleAssignment("MEMBER", null, null)),
+                            List.of(new ProjectGrant(projectId, Set.of("REVIEW")))));
+            var form = formService.create(projectId, admin, new CreateFormRequest(
+                    "审核申请", "ALL_MEMBERS", null, null, 1,
+                    new FormSchema(List.of(new FormField("invoices", "INVOICE", "发票", true,
+                            null, null, null, null, null, null, null)))));
+            formService.publish(form.id(), admin, new FormVersionRequest(form.version()));
+            projectService.open(projectId, admin, new ChangeStateRequest(project.version()));
+            formId = form.id();
+        }
+
+        String fileOne;
+        String fileTwo;
+        String applicationId;
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), applicant)) {
+            applicationId = applicationService.createDraft(formId, applicant).id();
+            fileOne = register(applicant, "review-one.pdf", "d");
+            fileTwo = register(applicant, "review-two.pdf", "e");
+        }
+        fileService.inspect(platform, organization.id(), fileOne, new InspectFileRequest("READY", null));
+        fileService.inspect(platform, organization.id(), fileTwo, new InspectFileRequest("READY", null));
+
+        String invoiceOne;
+        String invoiceTwo;
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), applicant)) {
+            invoiceOne = invoiceService.create(applicationId, applicant,
+                    invoiceRequest(fileOne, "100.00", "80.00", "R-001")).id();
+            invoiceTwo = invoiceService.create(applicationId, applicant,
+                    invoiceRequest(fileTwo, "200.00", "150.00", "R-002")).id();
+            var saved = applicationService.saveDraft(applicationId, applicant,
+                    new SaveDraftRequest(objectMapper.readTree("{\"invoices\":[\"" + invoiceOne
+                            + "\",\"" + invoiceTwo + "\"]}"), 0L));
+            applicationService.submit(applicationId, applicant, new SubmitRequest(saved.version()));
+        }
+
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), ordinary)) {
+            assertThat(reviewService.queue(1, 20, null, null, null).records()).isEmpty();
+            assertThatThrownBy(() -> reviewService.detail(invoiceOne))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode()).isEqualTo(BizCode.NO_PERMISSION));
+        }
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), scopedReviewer)) {
+            assertThat(reviewService.queue(1, 20, projectId, "SUBMITTED", null).records())
+                    .extracting("invoiceId").containsExactlyInAnyOrder(invoiceOne, invoiceTwo);
+        }
+
+        String returnReasonId = dictionaryItem(organization.id(), "RETURN_REASON", "AMOUNT_MISMATCH");
+        String categoryId = dictionaryItem(organization.id(), "EXPENSE_CATEGORY", "TRANSPORT");
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), reviewer)) {
+            assertThatThrownBy(() -> reviewService.approve(invoiceOne, reviewer,
+                    new ApproveReviewRequest(1L, null, null, null)))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode()).isEqualTo(BizCode.REVIEW_NOT_STARTED));
+            var started = reviewService.start(invoiceOne, reviewer, new StartReviewRequest(1L));
+            assertThat(started.invoice().status()).isEqualTo("IN_REVIEW");
+            assertThat(applicationStatus(applicationId)).isEqualTo("PROCESSING");
+            var returned = reviewService.returnForCorrection(invoiceOne, reviewer,
+                    new ReturnReviewRequest(2L, returnReasonId, "请核对申请金额",
+                            Set.of("claimedAmount")));
+            assertThat(returned.invoice().status()).isEqualTo("RETURNED");
+            assertThat(returned.reviews()).extracting("action")
+                    .containsExactly("START_REVIEW", "RETURN");
+            assertThat(applicationStatus(applicationId)).isEqualTo("RETURNED");
+        }
+
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), applicant)) {
+            assertThatThrownBy(() -> invoiceService.update(invoiceOne, applicant,
+                    new UpdateInvoiceRequest(3L, null, null, null, null, null,
+                            null, null, "不允许的销售方", null,
+                            null, null, null, Set.of())))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode())
+                                    .isEqualTo(BizCode.REVIEW_FIELD_NOT_ALLOWED));
+            var corrected = invoiceService.update(invoiceOne, applicant,
+                    new UpdateInvoiceRequest(3L, null, null, null, null, null,
+                            null, null, null, null, null, new BigDecimal("70.00"),
+                            null, Set.of()));
+            assertThat(corrected.claimedAmount()).isEqualByComparingTo("70.00");
+            var application = applicationService.detail(applicationId);
+            assertThatThrownBy(() -> applicationService.saveDraft(applicationId, applicant,
+                    new SaveDraftRequest(objectMapper.readTree("{\"invoices\":[]}"), application.version())))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode())
+                                    .isEqualTo(BizCode.REVIEW_ANSWER_IMMUTABLE));
+            applicationService.submit(applicationId, applicant, new SubmitRequest(application.version()));
+        }
+
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), reviewer)) {
+            reviewService.start(invoiceOne, reviewer, new StartReviewRequest(5L));
+            var approved = reviewService.approve(invoiceOne, reviewer,
+                    new ApproveReviewRequest(6L, categoryId, "已复核金额", null));
+            assertThat(approved.invoice().status()).isEqualTo("INTERNALLY_APPROVED");
+            assertThat(approved.internalNote()).isEqualTo("已复核金额");
+            assertThat(applicationStatus(applicationId)).isEqualTo("PROCESSING");
+
+            var batch = reviewService.batchApprove(reviewer,
+                    new BatchApproveRequest(List.of(new BatchApproveItem(invoiceTwo, 1L))));
+            assertThat(batch.getFirst().invoice().status()).isEqualTo("INTERNALLY_APPROVED");
+            assertThat(batch.getFirst().reviews()).extracting("action")
+                    .containsExactly("START_REVIEW", "APPROVE");
+            assertThat(batch.getFirst().reviews().getFirst().batchOperationId())
+                    .isEqualTo(batch.getFirst().reviews().getLast().batchOperationId());
+            assertThat(applicationStatus(applicationId)).isEqualTo("APPROVED");
+            assertThatThrownBy(() -> reviewService.start(invoiceOne, reviewer,
+                    new StartReviewRequest(4L)))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode()).isEqualTo(BizCode.VERSION_CONFLICT));
+        }
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), applicant)) {
+            assertThat(reviewService.history(invoiceOne)).extracting("action")
+                    .containsExactly("START_REVIEW", "RETURN", "START_REVIEW", "APPROVE");
+        }
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_log WHERE organization_id=?
+                  AND action LIKE 'INVOICE_REVIEW_%'
+                """, Integer.class, organization.id())).isEqualTo(5);
+    }
+
+    private String register(String actor, String name, String hashChar) {
+        return fileService.register(actor, new RegisterFileRequest(
+                name, "application/pdf", 1024L, hashChar.repeat(64), "INVOICE_ORIGINAL")).id();
+    }
+
+    private String dictionaryItem(String organizationId, String type, String code) {
+        return jdbcTemplate.queryForObject("""
+                SELECT di.id FROM dictionary_item di
+                JOIN dictionary_version dv ON dv.id=di.dictionary_version_id
+                WHERE di.organization_id=? AND dv.dictionary_type=? AND di.code=?
+                """, String.class, organizationId, type, code);
+    }
+
+    private String applicationStatus(String applicationId) {
+        return jdbcTemplate.queryForObject("SELECT status FROM application WHERE id=?",
+                String.class, applicationId);
+    }
+
+    private CreateInvoiceRequest invoiceRequest(String fileId, String face, String claimed,
+                                                 String invoiceNumber) {
+        return new CreateInvoiceRequest("VAT_ELECTRONIC", "3700", invoiceNumber, null,
+                LocalDate.of(2026, 8, 1), "山东大学", null, "测试供应商", null,
+                new BigDecimal(face), new BigDecimal(claimed), fileId, null);
+    }
+}

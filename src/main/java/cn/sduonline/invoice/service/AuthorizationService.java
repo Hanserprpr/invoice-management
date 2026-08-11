@@ -35,6 +35,25 @@ public class AuthorizationService {
         }
     }
 
+    public boolean hasPermission(String permission) {
+        return authorizationMapper.hasPermission(TenantContext.requireOrganizationId(),
+                TenantContext.requireCasId(), permission);
+    }
+
+    public boolean canReviewProject(String projectId) {
+        String organizationId = TenantContext.requireOrganizationId();
+        String casId = TenantContext.requireCasId();
+        return authorizationMapper.hasPermission(organizationId, casId, "application:review")
+                || authorizationMapper.hasProjectAccess(organizationId, projectId, casId, "REVIEW")
+                || authorizationMapper.hasProjectAccess(organizationId, projectId, casId, "MANAGE");
+    }
+
+    public void requireReviewProject(String projectId) {
+        if (!canReviewProject(projectId)) {
+            throw new BusinessException(BizCode.NO_PERMISSION, HttpStatus.FORBIDDEN);
+        }
+    }
+
     public void requireProjectAccess(String projectId, String accessType) {
         String organizationId = TenantContext.requireOrganizationId();
         String casId = TenantContext.requireCasId();

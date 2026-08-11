@@ -55,7 +55,10 @@ public class MybatisPlusConfig {
 
         @Override
         public boolean ignoreTable(String tableName) {
-            return GLOBAL_TABLES.contains(tableName.toLowerCase());
+            String normalized = tableName.replace("`", "").toLowerCase();
+            int schemaSeparator = normalized.lastIndexOf('.');
+            if (schemaSeparator >= 0) normalized = normalized.substring(schemaSeparator + 1);
+            return GLOBAL_TABLES.contains(normalized);
         }
     }
 }

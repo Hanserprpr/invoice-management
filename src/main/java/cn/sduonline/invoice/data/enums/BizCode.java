@@ -146,6 +146,8 @@ public enum BizCode {
     REVIEW_ANSWER_IMMUTABLE(60004, "不能修改社员原始答案"),
     /** 超出批量操作数量上限。 */
     BATCH_SIZE_EXCEEDED(60005, "超出批量操作数量上限"),
+    /** 退回后尝试修改未授权字段。 */
+    REVIEW_FIELD_NOT_ALLOWED(60006, "该字段未被允许修改"),
     /** 项目未启用纸票。 */
     PAPER_NOT_ENABLED(61000, "项目未启用纸票"),
     /** 纸票记录不存在。 */

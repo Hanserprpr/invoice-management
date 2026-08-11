@@ -14,4 +14,15 @@ public interface DictionaryItemMapper extends BaseMapper<DictionaryItem> {
     @InterceptorIgnore(tenantLine = "true")
     @Select("SELECT * FROM dictionary_item WHERE organization_id IS NULL AND dictionary_version_id=#{versionId} ORDER BY sort_order, id")
     List<DictionaryItem> findTemplateItems(@Param("versionId") String versionId);
+
+    @Select("""
+            SELECT di.* FROM dictionary_item di
+            JOIN dictionary_version dv ON dv.id=di.dictionary_version_id
+              AND dv.organization_id=di.organization_id
+            WHERE di.organization_id=#{organizationId} AND di.id=#{itemId}
+              AND di.enabled=TRUE AND dv.status='PUBLISHED' AND dv.dictionary_type=#{dictionaryType}
+            """)
+    DictionaryItem findEnabledByType(@Param("organizationId") String organizationId,
+                                     @Param("itemId") String itemId,
+                                     @Param("dictionaryType") String dictionaryType);
 }

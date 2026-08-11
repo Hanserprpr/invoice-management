@@ -18,6 +18,9 @@ import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class InvoiceService {
@@ -31,6 +34,8 @@ public class InvoiceService {
     private final DictionaryItemMapper dictionaryItemMapper;
     private final FileObjectService fileService;
     private final AuditService auditService;
+    private final ClubReviewMapper reviewMapper;
+    private final ObjectMapper objectMapper;
 
     public InvoiceService(InvoiceMapper invoiceMapper,
                           InvoiceFileRevisionMapper revisionMapper,
@@ -38,7 +43,9 @@ public class InvoiceService {
                           ApplicationMapper applicationMapper,
                           DictionaryItemMapper dictionaryItemMapper,
                           FileObjectService fileService,
-                          AuditService auditService) {
+                          AuditService auditService,
+                          ClubReviewMapper reviewMapper,
+                          ObjectMapper objectMapper) {
         this.invoiceMapper = invoiceMapper;
         this.revisionMapper = revisionMapper;
         this.attachmentMapper = attachmentMapper;
@@ -46,6 +53,8 @@ public class InvoiceService {
         this.dictionaryItemMapper = dictionaryItemMapper;
         this.fileService = fileService;
         this.auditService = auditService;
+        this.reviewMapper = reviewMapper;
+        this.objectMapper = objectMapper;
     }
 
     public List<InvoiceVO> listForApplication(String applicationId) {
@@ -59,6 +68,10 @@ public class InvoiceService {
 
     public InvoiceVO detail(String invoiceId) {
         return toVO(requireOwnInvoice(invoiceId));
+    }
+
+    public InvoiceVO toAuthorizedReviewVO(Invoice invoice) {
+        return toVO(invoice);
     }
 
     @Transactional
@@ -96,6 +109,20 @@ public class InvoiceService {
         requireApplicationEditable(requireOwnApplication(invoice.getApplicationId()));
         requireVersion(invoice, request.version());
         Set<String> clear = request.clearFields() == null ? Set.of() : request.clearFields();
+        Set<String> requestedFields = new HashSet<>(clear);
+        if (request.invoiceType() != null) requestedFields.add("invoiceType");
+        if (request.invoiceCode() != null) requestedFields.add("invoiceCode");
+        if (request.invoiceNumber() != null) requestedFields.add("invoiceNumber");
+        if (request.digitalInvoiceNo() != null) requestedFields.add("digitalInvoiceNo");
+        if (request.invoiceDate() != null) requestedFields.add("invoiceDate");
+        if (request.buyerName() != null) requestedFields.add("buyerName");
+        if (request.buyerTaxNo() != null) requestedFields.add("buyerTaxNo");
+        if (request.sellerName() != null) requestedFields.add("sellerName");
+        if (request.sellerTaxNo() != null) requestedFields.add("sellerTaxNo");
+        if (request.faceAmount() != null) requestedFields.add("faceAmount");
+        if (request.claimedAmount() != null) requestedFields.add("claimedAmount");
+        if (request.expenseCategoryItemId() != null) requestedFields.add("expenseCategoryItemId");
+        requireReturnedFields(invoice, requestedFields);
         if (request.invoiceType() != null) invoice.setInvoiceType(required(request.invoiceType()));
         if (request.invoiceCode() != null) invoice.setInvoiceCode(clean(request.invoiceCode()));
         if (request.invoiceNumber() != null) invoice.setInvoiceNumber(clean(request.invoiceNumber()));
@@ -125,6 +152,7 @@ public class InvoiceService {
         requireInvoiceEditable(invoice);
         requireApplicationEditable(requireOwnApplication(invoice.getApplicationId()));
         requireVersion(invoice, request.version());
+        requireReturnedFields(invoice, Set.of("currentFile"));
         fileService.requireReadyOwned(request.fileId(), actorCasId, ORIGINAL_PURPOSES);
         fileService.requireUnused(request.fileId());
         invoice.setCurrentFileId(request.fileId());
@@ -143,6 +171,7 @@ public class InvoiceService {
         requireInvoiceEditable(invoice);
         requireApplicationEditable(requireOwnApplication(invoice.getApplicationId()));
         requireVersion(invoice, request.version());
+        requireReturnedFields(invoice, Set.of("attachments"));
         fileService.requireReadyOwned(request.fileId(), actorCasId,
                 "OTHER".equals(request.attachmentType()) ? Set.of("OTHER")
                         : Set.of(request.attachmentType(), "OTHER"));
@@ -167,6 +196,7 @@ public class InvoiceService {
         requireInvoiceEditable(invoice);
         requireApplicationEditable(requireOwnApplication(invoice.getApplicationId()));
         requireVersion(invoice, request.version());
+        requireReturnedFields(invoice, Set.of("attachments"));
         Attachment attachment = attachmentMapper.selectOne(new LambdaQueryWrapper<Attachment>()
                 .eq(Attachment::getOrganizationId, invoice.getOrganizationId())
                 .eq(Attachment::getInvoiceId, invoiceId).eq(Attachment::getId, attachmentId));
@@ -212,7 +242,7 @@ public class InvoiceService {
         invoice.setVoidedByCasId(actorCasId);
         invoice.setVoidedAt(Instant.now());
         updateWithVersion(invoice, request.version());
-        applicationMapper.refreshAfterInvoiceVoid(invoice.getOrganizationId(), invoice.getApplicationId());
+        applicationMapper.refreshDerivedStatus(invoice.getOrganizationId(), invoice.getApplicationId());
         auditService.append(invoice.getOrganizationId(), actorCasId, "INVOICE_VOIDED",
                 "INVOICE", invoiceId, "{\"reason\":\"provided\"}");
         return toVO(invoice);
@@ -265,9 +295,8 @@ public class InvoiceService {
     private void validateCategory(String itemId) {
         String value = clean(itemId);
         if (value == null) return;
-        DictionaryItem item = dictionaryItemMapper.selectOne(new LambdaQueryWrapper<DictionaryItem>()
-                .eq(DictionaryItem::getOrganizationId, TenantContext.requireOrganizationId())
-                .eq(DictionaryItem::getId, value).eq(DictionaryItem::getEnabled, true));
+        DictionaryItem item = dictionaryItemMapper.findEnabledByType(
+                TenantContext.requireOrganizationId(), value, "EXPENSE_CATEGORY");
         if (item == null) throw new BusinessException(BizCode.DICTIONARY_ITEM_NOT_FOUND, HttpStatus.BAD_REQUEST);
     }
 
@@ -302,6 +331,20 @@ public class InvoiceService {
         if (fields.contains("sellerName")) invoice.setSellerName(null);
         if (fields.contains("sellerTaxNo")) invoice.setSellerTaxNo(null);
         if (fields.contains("expenseCategoryItemId")) invoice.setExpenseCategoryItemId(null);
+    }
+
+    private void requireReturnedFields(Invoice invoice, Set<String> requestedFields) {
+        if (!"RETURNED".equals(invoice.getStatus()) || requestedFields.isEmpty()) return;
+        String json = reviewMapper.findLatestReturnFields(invoice.getOrganizationId(), invoice.getId());
+        try {
+            Set<String> allowed = json == null ? Set.of()
+                    : objectMapper.readValue(json, new TypeReference<Set<String>>() {});
+            if (!allowed.containsAll(requestedFields)) {
+                throw new BusinessException(BizCode.REVIEW_FIELD_NOT_ALLOWED, HttpStatus.FORBIDDEN);
+            }
+        } catch (JacksonException exception) {
+            throw new BusinessException(BizCode.SYSTEM_ERROR, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
     }
 
     private String required(String value) {

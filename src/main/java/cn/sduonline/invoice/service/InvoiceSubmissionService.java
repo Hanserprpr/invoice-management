@@ -26,8 +26,8 @@ public class InvoiceSubmissionService {
         this.fileService = fileService;
     }
 
-    public void validateAndSubmit(String organizationId, String applicationId,
-                                  String actorCasId, FormSchema schema, JsonNode answers) {
+    public String validateAndSubmit(String organizationId, String applicationId,
+                                    String actorCasId, FormSchema schema, JsonNode answers) {
         List<Invoice> activeInvoices = invoiceMapper.selectList(new LambdaQueryWrapper<Invoice>()
                 .eq(Invoice::getOrganizationId, organizationId)
                 .eq(Invoice::getApplicationId, applicationId)
@@ -35,7 +35,8 @@ public class InvoiceSubmissionService {
         Set<String> actualIds = new HashSet<>();
         for (Invoice invoice : activeInvoices) {
             actualIds.add(invoice.getId());
-            if (!Set.of("DRAFT", "RETURNED").contains(invoice.getStatus())) {
+            if (!Set.of("DRAFT", "RETURNED", "SUBMITTED", "INTERNALLY_APPROVED", "REJECTED")
+                    .contains(invoice.getStatus())) {
                 throw new BusinessException(BizCode.INVOICE_STATE_NOT_ALLOWED, HttpStatus.CONFLICT);
             }
             validateAmount(invoice);
@@ -67,6 +68,7 @@ public class InvoiceSubmissionService {
                     "表单中的发票引用必须与当前申请发票一致");
         }
         for (Invoice invoice : activeInvoices) {
+            if (!Set.of("DRAFT", "RETURNED").contains(invoice.getStatus())) continue;
             long version = invoice.getVersion() == null ? 0 : invoice.getVersion();
             invoice.setStatus("SUBMITTED");
             invoice.setVersion(version);
@@ -74,6 +76,11 @@ public class InvoiceSubmissionService {
                 throw new BusinessException(BizCode.VERSION_CONFLICT, HttpStatus.CONFLICT);
             }
         }
+        boolean hasSubmitted = activeInvoices.stream().anyMatch(invoice ->
+                Set.of("DRAFT", "RETURNED", "SUBMITTED").contains(invoice.getStatus()));
+        boolean hasConcluded = activeInvoices.stream().anyMatch(invoice ->
+                Set.of("INTERNALLY_APPROVED", "REJECTED").contains(invoice.getStatus()));
+        return hasSubmitted && hasConcluded ? "PROCESSING" : "SUBMITTED";
     }
 
     private void addReferences(JsonNode value, Set<String> target) {

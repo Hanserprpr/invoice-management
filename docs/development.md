@@ -78,6 +78,11 @@ MYSQL_USERNAME=root MYSQL_PASSWORD=invoice_dev ./mvnw test
 - 替换发票原文件：`POST /api/invoices/{invoiceId}/replace-file`
 - 新增与作废发票附件：`POST /api/invoices/{invoiceId}/attachments`、`POST /api/invoices/{invoiceId}/attachments/{attachmentId}/void`
 - 作废已提交发票：`POST /api/invoices/{invoiceId}/void`
+- 审核队列与单票整理详情：`GET /api/reviews/invoices`、`GET /api/reviews/invoices/{invoiceId}`
+- 开始审核：`POST /api/reviews/invoices/{invoiceId}/start`
+- 内部通过、退回和拒绝：`POST /api/reviews/invoices/{invoiceId}/approve|return|reject`
+- 批量通过：`POST /api/reviews/invoices/batch/approve`
+- 单票审核历史：`GET /api/invoices/{invoiceId}/reviews`
 
 项目创建和编辑支持负责人及 `VIEW/SUBMIT/REVIEW/MANAGE` 范围的完整替换。项目状态不能通过通用编辑接口修改，只能使用上述语义化状态接口；所有编辑和状态接口均要求提交当前 `version`。
 
@@ -86,5 +91,7 @@ MYSQL_USERNAME=root MYSQL_PASSWORD=invoice_dev ./mvnw test
 申请草稿始终绑定创建时的表单版本。自动保存会进行字段类型、条件显示、数值范围和人员归属校验并追加修订记录；正式提交额外检查必填条件、项目/表单状态、时间窗口、提交范围、每人次数、附件就绪状态以及发票归属。表单中的发票 ID 集必须与申请下的未作废发票完全一致，提交成功后发票与申请在同一事务中转为 `SUBMITTED`。
 
 当前文件接口负责上传后元数据登记与安全状态流转，不接收文件二进制内容。新文件默认为 `PENDING`，只有平台检测回写为 `READY` 后才能被发票或附件引用；真实对象存储上传凭证、内容嗅探、病毒扫描及 OCR 适配器将在后续模块接入。
+
+审核入口同时支持社团级 `REVIEWER/CLUB_ADMIN` 与项目级 `REVIEW/MANAGE` 授权。单票结论必须先执行“开始审核”；批量通过会为已提交发票追加隐式 `START_REVIEW` 记录。退回必须使用已发布原因字典并指定可修改字段；申请人只能修改这些发票字段，表单原始答案保持不变。申请状态由所属发票的已提交、审核中、退回、通过、拒绝和作废状态统一派生。
 
 除社团列表和平台管理入口外，租户 API 必须携带 `X-Organization-Id`。写接口使用 Cookie CSRF Token，并通过 `X-XSRF-TOKEN` 请求头回传。

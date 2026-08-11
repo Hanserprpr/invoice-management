@@ -143,6 +143,9 @@ public class ApplicationService {
         JsonNode previous = readTree(application.getAnswersJson());
         Set<String> changedFields = changedFields(previous, request.answers());
         if (changedFields.isEmpty()) return toVO(application);
+        if ("RETURNED".equals(application.getStatus())) {
+            throw new BusinessException(BizCode.REVIEW_ANSWER_IMMUTABLE, HttpStatus.FORBIDDEN);
+        }
         String answerJson = writeJson(request.answers());
         if (answerJson.length() > 1_000_000) invalid();
         application.setAnswersJson(answerJson);
@@ -174,9 +177,9 @@ public class ApplicationService {
                 && submitted > form.getMaxSubmissionsPerUser())) {
             throw new BusinessException(BizCode.SUBMISSION_LIMIT_REACHED, HttpStatus.CONFLICT);
         }
-        invoiceSubmissionService.validateAndSubmit(application.getOrganizationId(), applicationId,
-                actorCasId, schema, answers);
-        application.setStatus("SUBMITTED");
+        String derivedStatus = invoiceSubmissionService.validateAndSubmit(
+                application.getOrganizationId(), applicationId, actorCasId, schema, answers);
+        application.setStatus(derivedStatus);
         application.setSubmittedAt(Instant.now());
         updateWithVersion(application, request.version());
         auditService.append(application.getOrganizationId(), actorCasId, "APPLICATION_SUBMITTED",
