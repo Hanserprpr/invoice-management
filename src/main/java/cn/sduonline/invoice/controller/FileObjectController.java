@@ -1,7 +1,10 @@
 package cn.sduonline.invoice.controller;
 
 import cn.sduonline.invoice.data.dto.FileDtos.RegisterFileRequest;
+import cn.sduonline.invoice.data.dto.FileDtos.CompleteUploadRequest;
+import cn.sduonline.invoice.data.vo.FileDownloadVO;
 import cn.sduonline.invoice.data.vo.FileObjectVO;
+import cn.sduonline.invoice.data.vo.FileUploadVO;
 import cn.sduonline.invoice.data.vo.Result;
 import cn.sduonline.invoice.service.FileObjectService;
 import jakarta.validation.Valid;
@@ -29,5 +32,25 @@ public class FileObjectController {
     @GetMapping("/{fileId}")
     public Result<FileObjectVO> detail(@PathVariable String fileId) {
         return Result.ok(fileService.detail(fileId));
+    }
+
+    @PostMapping("/uploads")
+    public ResponseEntity<Result<FileUploadVO>> createUpload(
+            Authentication authentication,
+            @Valid @RequestBody RegisterFileRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(Result.ok(fileService.createUpload(authentication.getName(), request)));
+    }
+
+    @PostMapping("/{fileId}/upload-complete")
+    public Result<FileObjectVO> completeUpload(Authentication authentication,
+                                                @PathVariable String fileId,
+                                                @Valid @RequestBody CompleteUploadRequest request) {
+        return Result.ok(fileService.completeUpload(authentication.getName(), fileId, request));
+    }
+
+    @GetMapping("/{fileId}/download-url")
+    public Result<FileDownloadVO> downloadUrl(@PathVariable String fileId) {
+        return Result.ok(fileService.createDownload(fileId));
     }
 }

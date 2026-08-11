@@ -206,6 +206,10 @@ public enum BizCode {
     FILE_NOT_FOUND(80007, "文件不存在"),
     /** 文件已被其他业务记录引用。 */
     FILE_ALREADY_USED(80008, "文件已被使用"),
+    /** 对象存储尚未配置。 */
+    OBJECT_STORAGE_NOT_CONFIGURED(80009, "对象存储尚未配置"),
+    /** 对象尚未上传或上传内容与登记信息不一致。 */
+    FILE_UPLOAD_INVALID(80010, "文件上传未完成或内容不匹配"),
 
     // ---------- 9xxxx 系统 ----------
     /** 系统内部异常。 */

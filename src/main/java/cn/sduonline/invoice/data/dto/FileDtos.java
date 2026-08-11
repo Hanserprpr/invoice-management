@@ -24,4 +24,8 @@ public final class FileDtos {
             @NotBlank @Pattern(regexp = "READY|REJECTED|FAILED") String status,
             @Size(max = 26) String previewFileId) {
     }
+
+    public record CompleteUploadRequest(
+            @NotBlank @Pattern(regexp = "(?i)^[0-9a-f]{64}$") String sha256) {
+    }
 }

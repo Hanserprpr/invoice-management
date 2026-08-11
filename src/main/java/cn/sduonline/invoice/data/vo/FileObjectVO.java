@@ -10,7 +10,6 @@ public record FileObjectVO(
         String sha256,
         String purpose,
         String scanStatus,
-        String storageKey,
         String previewFileId,
         Instant readyAt,
         Instant expiresAt,

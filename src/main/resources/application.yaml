@@ -19,6 +19,15 @@ server:
   forward-headers-strategy: framework
 
 app:
+  storage:
+    r2:
+      enabled: ${R2_ENABLED:false}
+      account-id: ${R2_ACCOUNT_ID:}
+      access-key-id: ${R2_ACCESS_KEY_ID:}
+      secret-access-key: ${R2_SECRET_ACCESS_KEY:}
+      bucket: ${R2_BUCKET:}
+      upload-url-ttl: ${R2_UPLOAD_URL_TTL:10m}
+      download-url-ttl: ${R2_DOWNLOAD_URL_TTL:5m}
   bootstrap:
     platform-admin:
       cas-id: ${APP_BOOTSTRAP_PLATFORM_ADMIN_CAS_ID:}

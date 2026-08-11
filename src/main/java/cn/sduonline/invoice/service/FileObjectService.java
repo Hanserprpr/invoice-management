@@ -1,12 +1,17 @@
 package cn.sduonline.invoice.service;
 
 import cn.sduonline.invoice.data.dto.FileDtos.InspectFileRequest;
+import cn.sduonline.invoice.data.dto.FileDtos.CompleteUploadRequest;
 import cn.sduonline.invoice.data.dto.FileDtos.RegisterFileRequest;
 import cn.sduonline.invoice.data.enums.BizCode;
 import cn.sduonline.invoice.data.po.FileObject;
 import cn.sduonline.invoice.data.vo.FileObjectVO;
+import cn.sduonline.invoice.data.vo.FileUploadVO;
+import cn.sduonline.invoice.data.vo.FileDownloadVO;
 import cn.sduonline.invoice.exception.BusinessException;
 import cn.sduonline.invoice.mapper.FileObjectMapper;
+import cn.sduonline.invoice.mapper.LedgerMapper;
+import cn.sduonline.invoice.storage.ObjectStorage;
 import cn.sduonline.invoice.tenant.TenantContext;
 import cn.sduonline.invoice.util.UlidGenerator;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -30,13 +35,85 @@ public class FileObjectService {
     private final FileObjectMapper fileMapper;
     private final AuthorizationService authorizationService;
     private final AuditService auditService;
+    private final LedgerMapper ledgerMapper;
+    private final ObjectStorage objectStorage;
 
     public FileObjectService(FileObjectMapper fileMapper,
                              AuthorizationService authorizationService,
-                             AuditService auditService) {
+                             AuditService auditService,
+                             LedgerMapper ledgerMapper,
+                             ObjectStorage objectStorage) {
         this.fileMapper = fileMapper;
         this.authorizationService = authorizationService;
         this.auditService = auditService;
+        this.ledgerMapper = ledgerMapper;
+        this.objectStorage = objectStorage;
+    }
+
+    @Transactional
+    public FileUploadVO createUpload(String actorCasId, RegisterFileRequest request) {
+        FileObjectVO registered = register(actorCasId, request);
+        String organizationId = TenantContext.requireOrganizationId();
+        FileObject file = fileMapper.findByOrganizationAndId(organizationId, registered.id());
+        if (file == null) throw new BusinessException(BizCode.FILE_NOT_FOUND, HttpStatus.NOT_FOUND);
+        if (!"PENDING".equals(file.getScanStatus())) {
+            throw new BusinessException(BizCode.STATE_NOT_ALLOWED, HttpStatus.CONFLICT);
+        }
+        ObjectStorage.UploadGrant grant = objectStorage.createUploadGrant(file.getStorageKey(),
+                file.getContentType(), file.getSizeBytes(), file.getSha256());
+        return new FileUploadVO(toVO(file), "PUT", grant.url(), grant.requiredHeaders(),
+                grant.expiresAt());
+    }
+
+    @Transactional
+    public FileObjectVO completeUpload(String actorCasId, String fileId,
+                                       CompleteUploadRequest request) {
+        String organizationId = TenantContext.requireOrganizationId();
+        FileObject file = fileMapper.selectOne(new LambdaQueryWrapper<FileObject>()
+                .eq(FileObject::getOrganizationId, organizationId)
+                .eq(FileObject::getId, fileId)
+                .eq(FileObject::getUploaderCasId, actorCasId));
+        if (file == null) throw new BusinessException(BizCode.FILE_NOT_FOUND, HttpStatus.NOT_FOUND);
+        if (!file.getSha256().equalsIgnoreCase(request.sha256())) throw uploadInvalid();
+        if (Set.of("SCANNING", "READY").contains(file.getScanStatus())) return toVO(file);
+        if (!"PENDING".equals(file.getScanStatus())) {
+            throw new BusinessException(BizCode.STATE_NOT_ALLOWED, HttpStatus.CONFLICT);
+        }
+        ObjectStorage.StoredObject stored = objectStorage.headUpload(file.getStorageKey())
+                .orElseThrow(this::uploadInvalid);
+        String storedHash = stored.metadata().get("sha256");
+        if (stored.sizeBytes() != file.getSizeBytes()
+                || stored.contentType() == null
+                || !stored.contentType().equalsIgnoreCase(file.getContentType())
+                || storedHash == null
+                || !storedHash.equalsIgnoreCase(file.getSha256())) {
+            throw uploadInvalid();
+        }
+        if (fileMapper.markUploadCompleted(organizationId, fileId) != 1) {
+            throw new BusinessException(BizCode.STATE_NOT_ALLOWED, HttpStatus.CONFLICT);
+        }
+        objectStorage.finalizeUpload(file.getStorageKey());
+        file.setScanStatus("SCANNING");
+        auditService.append(organizationId, actorCasId, "FILE_UPLOAD_COMPLETED", "FILE", fileId,
+                "{\"sizeBytes\":" + file.getSizeBytes() + "}");
+        return toVO(file);
+    }
+
+    public FileDownloadVO createDownload(String fileId) {
+        String organizationId = TenantContext.requireOrganizationId();
+        String actorCasId = TenantContext.requireCasId();
+        FileObject file = fileMapper.findByOrganizationAndId(organizationId, fileId);
+        if (file == null) throw new BusinessException(BizCode.FILE_NOT_FOUND, HttpStatus.NOT_FOUND);
+        if (!"READY".equals(file.getScanStatus())) {
+            throw new BusinessException(BizCode.FILE_NOT_READY, HttpStatus.CONFLICT);
+        }
+        if (!actorCasId.equals(file.getUploaderCasId()) && !canAccessLinkedInvoice(
+                organizationId, actorCasId, fileId)) {
+            throw new BusinessException(BizCode.FILE_NOT_FOUND, HttpStatus.NOT_FOUND);
+        }
+        ObjectStorage.DownloadGrant grant = objectStorage.createDownloadGrant(file.getStorageKey(),
+                file.getOriginalName(), file.getContentType());
+        return new FileDownloadVO(grant.url(), grant.expiresAt());
     }
 
     @Transactional
@@ -161,6 +238,18 @@ public class FileObjectService {
         if (!matches) throw new BusinessException(BizCode.FILE_TYPE_NOT_ALLOWED, HttpStatus.BAD_REQUEST);
     }
 
+    private boolean canAccessLinkedInvoice(String organizationId, String actorCasId, String fileId) {
+        boolean unrestricted = authorizationService.hasPermission("application:review")
+                || authorizationService.hasPermission("audit-log:read");
+        return fileMapper.findLinkedInvoiceIds(organizationId, fileId).stream()
+                .anyMatch(invoiceId -> ledgerMapper.canAccessInvoice(
+                        organizationId, actorCasId, unrestricted, invoiceId));
+    }
+
+    private BusinessException uploadInvalid() {
+        return new BusinessException(BizCode.FILE_UPLOAD_INVALID, HttpStatus.CONFLICT);
+    }
+
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value;
     }
@@ -168,7 +257,7 @@ public class FileObjectService {
     private FileObjectVO toVO(FileObject file) {
         return new FileObjectVO(file.getId(), file.getOriginalName(), file.getContentType(),
                 file.getSizeBytes(), file.getSha256(), file.getPurpose(), file.getScanStatus(),
-                file.getStorageKey(), file.getPreviewFileId(), file.getReadyAt(),
+                file.getPreviewFileId(), file.getReadyAt(),
                 file.getExpiresAt(), file.getCreatedAt());
     }
 }
