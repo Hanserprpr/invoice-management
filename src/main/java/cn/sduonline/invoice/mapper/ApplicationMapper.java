@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 @Mapper
 public interface ApplicationMapper extends BaseMapper<Application> {
@@ -34,4 +35,18 @@ public interface ApplicationMapper extends BaseMapper<Application> {
     @InterceptorIgnore(tenantLine = "true")
     @Select("SELECT cas_id FROM `user` WHERE cas_id=#{casId} FOR UPDATE")
     String lockApplicant(@Param("casId") String casId);
+
+    @Update("""
+            UPDATE application SET status=CASE
+              WHEN NOT EXISTS (SELECT 1 FROM invoice i WHERE i.organization_id=#{organizationId}
+                    AND i.application_id=#{applicationId} AND i.status!='VOIDED') THEN 'REJECTED'
+              WHEN NOT EXISTS (SELECT 1 FROM invoice i WHERE i.organization_id=#{organizationId}
+                    AND i.application_id=#{applicationId} AND i.status NOT IN ('SUBMITTED','VOIDED'))
+                    THEN 'SUBMITTED'
+              ELSE status END,
+              version=version+1
+            WHERE organization_id=#{organizationId} AND id=#{applicationId} AND status!='DRAFT'
+            """)
+    int refreshAfterInvoiceVoid(@Param("organizationId") String organizationId,
+                                @Param("applicationId") String applicationId);
 }

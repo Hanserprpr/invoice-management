@@ -45,6 +45,7 @@ public class ApplicationService {
     private final AuthorizationService authorizationService;
     private final ApplicationAnswerValidator answerValidator;
     private final AuditService auditService;
+    private final InvoiceSubmissionService invoiceSubmissionService;
     private final ObjectMapper objectMapper;
 
     public ApplicationService(ApplicationMapper applicationMapper,
@@ -54,6 +55,7 @@ public class ApplicationService {
                               ProjectMapper projectMapper,
                               AuthorizationService authorizationService,
                               ApplicationAnswerValidator answerValidator,
+                              InvoiceSubmissionService invoiceSubmissionService,
                               AuditService auditService,
                               ObjectMapper objectMapper) {
         this.applicationMapper = applicationMapper;
@@ -63,6 +65,7 @@ public class ApplicationService {
         this.projectMapper = projectMapper;
         this.authorizationService = authorizationService;
         this.answerValidator = answerValidator;
+        this.invoiceSubmissionService = invoiceSubmissionService;
         this.auditService = auditService;
         this.objectMapper = objectMapper;
     }
@@ -161,7 +164,8 @@ public class ApplicationService {
         requireCurrentlyAvailable(form);
         requireSubmissionScope(form);
         FormSchema schema = readSchema(formVersion.getSchemaJson());
-        answerValidator.validate(schema, readTree(application.getAnswersJson()), true);
+        JsonNode answers = readTree(application.getAnswersJson());
+        answerValidator.validate(schema, answers, true);
         applicationMapper.lockApplicant(actorCasId);
         int submitted = applicationMapper.countSubmittedForApplicant(
                 application.getOrganizationId(), form.getId(), actorCasId);
@@ -170,6 +174,8 @@ public class ApplicationService {
                 && submitted > form.getMaxSubmissionsPerUser())) {
             throw new BusinessException(BizCode.SUBMISSION_LIMIT_REACHED, HttpStatus.CONFLICT);
         }
+        invoiceSubmissionService.validateAndSubmit(application.getOrganizationId(), applicationId,
+                actorCasId, schema, answers);
         application.setStatus("SUBMITTED");
         application.setSubmittedAt(Instant.now());
         updateWithVersion(application, request.version());

@@ -3,6 +3,8 @@ package cn.sduonline.invoice.data.po;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -25,10 +27,14 @@ public class Attachment {
     private String invoiceId;
     private String attachmentType;
     private String fileId;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String description;
     private String status;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String voidReason;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String voidedByCasId;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Instant voidedAt;
     private String createdByCasId;
     private Instant createdAt;

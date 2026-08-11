@@ -198,6 +198,10 @@ public enum BizCode {
     THIRD_PARTY_TIMEOUT(80005, "第三方接口超时"),
     /** 第三方返回异常。 */
     THIRD_PARTY_BAD_RESPONSE(80006, "第三方返回异常"),
+    /** 文件记录不存在。 */
+    FILE_NOT_FOUND(80007, "文件不存在"),
+    /** 文件已被其他业务记录引用。 */
+    FILE_ALREADY_USED(80008, "文件已被使用"),
 
     // ---------- 9xxxx 系统 ----------
     /** 系统内部异常。 */

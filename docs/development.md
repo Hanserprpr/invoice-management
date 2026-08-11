@@ -71,11 +71,20 @@ MYSQL_USERNAME=root MYSQL_PASSWORD=invoice_dev ./mvnw test
 - 自动保存申请答案：`PATCH /api/applications/{applicationId}`
 - 正式提交申请：`POST /api/applications/{applicationId}/submit`
 - 申请答案修订历史：`GET /api/applications/{applicationId}/revisions`
+- 文件元数据登记与本人查看：`POST /api/files`、`GET /api/files/{fileId}`
+- 平台文件检测结果回写：`POST /api/platform/organizations/{organizationId}/files/{fileId}/inspection`
+- 申请发票列表与新增：`GET|POST /api/applications/{applicationId}/invoices`
+- 发票详情、编辑与删除草稿：`GET|PATCH|DELETE /api/invoices/{invoiceId}`
+- 替换发票原文件：`POST /api/invoices/{invoiceId}/replace-file`
+- 新增与作废发票附件：`POST /api/invoices/{invoiceId}/attachments`、`POST /api/invoices/{invoiceId}/attachments/{attachmentId}/void`
+- 作废已提交发票：`POST /api/invoices/{invoiceId}/void`
 
 项目创建和编辑支持负责人及 `VIEW/SUBMIT/REVIEW/MANAGE` 范围的完整替换。项目状态不能通过通用编辑接口修改，只能使用上述语义化状态接口；所有编辑和状态接口均要求提交当前 `version`。
 
 表单草稿结构保存在 `application_form.draft_schema_json`，发布时复制到不可变的 `form_version`。字段条件只允许结构化操作符，不接受脚本或任意表达式；历史版本没有修改或删除接口。
 
-申请草稿始终绑定创建时的表单版本。自动保存会进行字段类型、条件显示、数值范围和人员归属校验并追加修订记录；正式提交额外检查必填条件、项目/表单状态、时间窗口、提交范围和每人次数。附件与发票字段目前只校验 JSON 形状，真实文件状态和发票归属将在文件及发票模块中校验。
+申请草稿始终绑定创建时的表单版本。自动保存会进行字段类型、条件显示、数值范围和人员归属校验并追加修订记录；正式提交额外检查必填条件、项目/表单状态、时间窗口、提交范围、每人次数、附件就绪状态以及发票归属。表单中的发票 ID 集必须与申请下的未作废发票完全一致，提交成功后发票与申请在同一事务中转为 `SUBMITTED`。
+
+当前文件接口负责上传后元数据登记与安全状态流转，不接收文件二进制内容。新文件默认为 `PENDING`，只有平台检测回写为 `READY` 后才能被发票或附件引用；真实对象存储上传凭证、内容嗅探、病毒扫描及 OCR 适配器将在后续模块接入。
 
 除社团列表和平台管理入口外，租户 API 必须携带 `X-Organization-Id`。写接口使用 Cookie CSRF Token，并通过 `X-XSRF-TOKEN` 请求头回传。
