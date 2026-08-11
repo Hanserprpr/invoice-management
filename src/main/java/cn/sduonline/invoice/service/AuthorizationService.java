@@ -74,6 +74,13 @@ public class AuthorizationService {
                 || authorizationMapper.hasProjectAccess(organizationId, projectId, casId, "MANAGE");
     }
 
+    public boolean canSubmitProject(String projectId) {
+        String organizationId = TenantContext.requireOrganizationId();
+        String casId = TenantContext.requireCasId();
+        return canManageProject(projectId)
+                || authorizationMapper.hasProjectAccess(organizationId, projectId, casId, "SUBMIT");
+    }
+
     public void requireTenantPath(String organizationId) {
         if (!organizationId.equals(TenantContext.requireOrganizationId())) {
             throw new BusinessException(BizCode.CROSS_CLUB_FORBIDDEN, HttpStatus.FORBIDDEN);

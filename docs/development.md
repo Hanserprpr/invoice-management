@@ -65,9 +65,17 @@ MYSQL_USERNAME=root MYSQL_PASSWORD=invoice_dev ./mvnw test
 - 发布新版本：`POST /api/forms/{formId}/publish`
 - 暂停、恢复和结束：`POST /api/forms/{formId}/pause|resume|end`
 - 表单版本历史：`GET /api/forms/{formId}/versions`、`GET /api/forms/{formId}/versions/{versionNo}`
+- 当前成员可填写表单：`GET /api/application-forms`、`GET /api/application-forms/{formId}`
+- 创建或复用申请草稿：`POST /api/application-forms/{formId}/applications`
+- 本人申请列表和详情：`GET /api/applications`、`GET /api/applications/{applicationId}`
+- 自动保存申请答案：`PATCH /api/applications/{applicationId}`
+- 正式提交申请：`POST /api/applications/{applicationId}/submit`
+- 申请答案修订历史：`GET /api/applications/{applicationId}/revisions`
 
 项目创建和编辑支持负责人及 `VIEW/SUBMIT/REVIEW/MANAGE` 范围的完整替换。项目状态不能通过通用编辑接口修改，只能使用上述语义化状态接口；所有编辑和状态接口均要求提交当前 `version`。
 
 表单草稿结构保存在 `application_form.draft_schema_json`，发布时复制到不可变的 `form_version`。字段条件只允许结构化操作符，不接受脚本或任意表达式；历史版本没有修改或删除接口。
+
+申请草稿始终绑定创建时的表单版本。自动保存会进行字段类型、条件显示、数值范围和人员归属校验并追加修订记录；正式提交额外检查必填条件、项目/表单状态、时间窗口、提交范围和每人次数。附件与发票字段目前只校验 JSON 形状，真实文件状态和发票归属将在文件及发票模块中校验。
 
 除社团列表和平台管理入口外，租户 API 必须携带 `X-Organization-Id`。写接口使用 Cookie CSRF Token，并通过 `X-XSRF-TOKEN` 请求头回传。
