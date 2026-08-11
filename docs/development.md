@@ -59,7 +59,15 @@ MYSQL_USERNAME=root MYSQL_PASSWORD=invoice_dev ./mvnw test
 - 停止收集：`POST /api/projects/{projectId}/stop-collection`
 - 开始整理：`POST /api/projects/{projectId}/start-organizing`
 - 归档项目：`POST /api/projects/{projectId}/archive`
+- 表单列表和创建：`GET|POST /api/projects/{projectId}/forms`
+- 从已发布表单复制草稿：`POST /api/projects/{projectId}/forms/copy`
+- 表单详情和草稿编辑：`GET|PATCH /api/forms/{formId}`
+- 发布新版本：`POST /api/forms/{formId}/publish`
+- 暂停、恢复和结束：`POST /api/forms/{formId}/pause|resume|end`
+- 表单版本历史：`GET /api/forms/{formId}/versions`、`GET /api/forms/{formId}/versions/{versionNo}`
 
 项目创建和编辑支持负责人及 `VIEW/SUBMIT/REVIEW/MANAGE` 范围的完整替换。项目状态不能通过通用编辑接口修改，只能使用上述语义化状态接口；所有编辑和状态接口均要求提交当前 `version`。
+
+表单草稿结构保存在 `application_form.draft_schema_json`，发布时复制到不可变的 `form_version`。字段条件只允许结构化操作符，不接受脚本或任意表达式；历史版本没有修改或删除接口。
 
 除社团列表和平台管理入口外，租户 API 必须携带 `X-Organization-Id`。写接口使用 Cookie CSRF Token，并通过 `X-XSRF-TOKEN` 请求头回传。

@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
+import com.baomidou.mybatisplus.annotation.TableField;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -27,9 +29,12 @@ public class ApplicationForm {
     private String name;
     private String status;
     private String submissionScope;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Instant startsAt;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Instant endsAt;
     private Integer maxSubmissionsPerUser;
+    private String draftSchemaJson;
     @Version
     private Long version;
     private String createdByCasId;

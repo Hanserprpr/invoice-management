@@ -416,6 +416,7 @@ CREATE TABLE application_form (
     starts_at DATETIME(3) NULL,
     ends_at DATETIME(3) NULL,
     max_submissions_per_user INT UNSIGNED NOT NULL DEFAULT 1,
+    draft_schema_json JSON NOT NULL,
     version BIGINT UNSIGNED NOT NULL DEFAULT 0,
     created_by_cas_id VARCHAR(20) NOT NULL,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),

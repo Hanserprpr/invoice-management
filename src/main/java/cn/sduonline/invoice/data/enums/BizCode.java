@@ -94,6 +94,8 @@ public enum BizCode {
     FORM_VERSION_IMMUTABLE(41002, "已有申请的表单版本不可修改或删除"),
     /** 申请表尚未发布。 */
     FORM_NOT_PUBLISHED(41003, "申请表尚未发布"),
+    /** 申请表当前状态不允许该操作。 */
+    FORM_STATE_NOT_ALLOWED(41004, "申请表当前状态不允许该操作"),
     /** 申请记录不存在。 */
     APPLICATION_NOT_FOUND(42000, "申请记录不存在"),
     /** 申请当前状态不允许该操作。 */

@@ -58,6 +58,11 @@ class DatabaseMigrationIntegrationTests {
                 WHERE table_schema=DATABASE() AND table_name='dictionary_item'
                   AND column_name='organization_id'
                 """, String.class)).isEqualTo("YES");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT CONCAT(data_type, ':', is_nullable) FROM information_schema.columns
+                WHERE table_schema=DATABASE() AND table_name='application_form'
+                  AND column_name='draft_schema_json'
+                """, String.class)).isEqualTo("json:NO");
         assertThat(flyway.migrate().migrationsExecuted).isZero();
     }
 

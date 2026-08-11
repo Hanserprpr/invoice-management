@@ -2,7 +2,10 @@ package cn.sduonline.invoice;
 
 import cn.sduonline.invoice.data.dto.OrganizationDtos.CreateOrganizationRequest;
 import cn.sduonline.invoice.data.dto.OrganizationDtos.InitialAdmin;
+import cn.sduonline.invoice.data.dto.ProjectDtos.CreateProjectRequest;
 import cn.sduonline.invoice.service.OrganizationService;
+import cn.sduonline.invoice.service.ProjectService;
+import cn.sduonline.invoice.tenant.TenantContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -21,6 +24,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.List;
+
 @SpringBootTest(properties = {
         "app.security.oidc.client-id=test-client-id",
         "app.security.oidc.client-secret=test-client-secret"
@@ -32,6 +37,7 @@ class ApiSecurityIntegrationTests {
     @Autowired MockMvc mockMvc;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired OrganizationService organizationService;
+    @Autowired ProjectService projectService;
 
     @BeforeEach
     void requireDedicatedTestDatabase() {
@@ -104,5 +110,45 @@ class ApiSecurityIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.records[0].name").value("接口创建项目"));
+    }
+
+    @Test
+    @Transactional
+    void projectManagerCreatesFormDraftThroughHttpApi() throws Exception {
+        jdbcTemplate.update("""
+                INSERT INTO `user`(cas_id,name,status,is_platform_admin)
+                VALUES ('form-api-platform','平台管理员','ACTIVE',TRUE)
+                """);
+        var organization = organizationService.create("form-api-platform",
+                new CreateOrganizationRequest("表单接口测试社团", "CLUB",
+                        new InitialAdmin("form-api-admin", "表单接口管理员", null, null)));
+        String projectId;
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), "form-api-admin")) {
+            projectId = projectService.create("form-api-admin", new CreateProjectRequest(
+                    "表单接口项目", null, null, null, false, "ALL", null, null,
+                    List.of("form-api-admin"), List.of())).id();
+        }
+
+        mockMvc.perform(post("/api/projects/{projectId}/forms", projectId)
+                        .header("X-Organization-Id", organization.id())
+                        .with(user("form-api-admin")).with(csrf())
+                        .contentType("application/json")
+                        .content("""
+                                {
+                                  "name":"接口申请表",
+                                  "submissionScope":"ALL_MEMBERS",
+                                  "maxSubmissionsPerUser":1,
+                                  "schema":{"fields":[{
+                                    "key":"purpose",
+                                    "type":"TEXT",
+                                    "label":"用途",
+                                    "required":true
+                                  }]}
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.status").value("DRAFT"))
+                .andExpect(jsonPath("$.data.draftSchema.fields[0].key").value("purpose"));
     }
 }
