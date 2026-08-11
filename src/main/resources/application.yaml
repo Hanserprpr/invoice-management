@@ -1,3 +1,31 @@
 spring:
   application:
     name: invoice-management
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/invoice_management?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: true
+    clean-disabled: true
+    locations: classpath:db/migration
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+
+server:
+  forward-headers-strategy: framework
+
+app:
+  bootstrap:
+    platform-admin:
+      cas-id: ${APP_BOOTSTRAP_PLATFORM_ADMIN_CAS_ID:}
+      name: ${APP_BOOTSTRAP_PLATFORM_ADMIN_NAME:}
+  security:
+    oidc:
+      client-id: ${SDU_OIDC_CLIENT_ID}
+      client-secret: ${SDU_OIDC_CLIENT_SECRET}
+      redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+      success-url: ${OIDC_LOGIN_SUCCESS_URL:/auth/login/success}
