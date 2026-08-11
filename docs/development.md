@@ -83,6 +83,9 @@ MYSQL_USERNAME=root MYSQL_PASSWORD=invoice_dev ./mvnw test
 - 内部通过、退回和拒绝：`POST /api/reviews/invoices/{invoiceId}/approve|return|reject`
 - 批量通过：`POST /api/reviews/invoices/batch/approve`
 - 单票审核历史：`GET /api/invoices/{invoiceId}/reviews`
+- 发票台账、筛选、排序与金额合计：`GET /api/ledger/invoices`
+- 单票聚合时间线：`GET /api/ledger/invoices/{invoiceId}/timeline`
+- 本人保存筛选：`GET|POST /api/ledger/saved-filters`、`PATCH|DELETE /api/ledger/saved-filters/{filterId}`
 
 项目创建和编辑支持负责人及 `VIEW/SUBMIT/REVIEW/MANAGE` 范围的完整替换。项目状态不能通过通用编辑接口修改，只能使用上述语义化状态接口；所有编辑和状态接口均要求提交当前 `version`。
 
@@ -93,5 +96,7 @@ MYSQL_USERNAME=root MYSQL_PASSWORD=invoice_dev ./mvnw test
 当前文件接口负责上传后元数据登记与安全状态流转，不接收文件二进制内容。新文件默认为 `PENDING`，只有平台检测回写为 `READY` 后才能被发票或附件引用；真实对象存储上传凭证、内容嗅探、病毒扫描及 OCR 适配器将在后续模块接入。
 
 审核入口同时支持社团级 `REVIEWER/CLUB_ADMIN` 与项目级 `REVIEW/MANAGE` 授权。单票结论必须先执行“开始审核”；批量通过会为已提交发票追加隐式 `START_REVIEW` 记录。退回必须使用已发布原因字典并指定可修改字段；申请人只能修改这些发票字段，表单原始答案保持不变。申请状态由所属发票的已提交、审核中、退回、通过、拒绝和作废状态统一派生。
+
+台账列表与合计查询共用相同的租户、权限和业务筛选条件，合计不受当前页大小影响。普通社员只能查看本人发票；社团审核或审计角色可查看授权范围，项目负责人和具有 `VIEW/REVIEW/MANAGE` 范围的成员只能查看相应项目。时间线访问使用同一权限判定，不会因已知发票 ID 而绕过数据范围。
 
 除社团列表和平台管理入口外，租户 API 必须携带 `X-Organization-Id`。写接口使用 Cookie CSRF Token，并通过 `X-XSRF-TOKEN` 请求头回传。

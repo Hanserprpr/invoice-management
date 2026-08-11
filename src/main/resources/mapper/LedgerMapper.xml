@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.sduonline.invoice.mapper.LedgerMapper">
+
+    <sql id="fromAndJoins">
+        FROM invoice i
+        JOIN application a ON a.id=i.application_id AND a.organization_id=i.organization_id
+        JOIN `user` u ON u.cas_id=a.applicant_cas_id
+        JOIN form_version fv ON fv.id=a.form_version_id AND fv.organization_id=a.organization_id
+        JOIN application_form af ON af.id=fv.form_id AND af.organization_id=fv.organization_id
+        JOIN project p ON p.id=af.project_id AND p.organization_id=af.organization_id
+        LEFT JOIN dictionary_item category ON category.id=i.expense_category_item_id
+          AND category.organization_id=i.organization_id
+        LEFT JOIN paper_item pi ON pi.invoice_id=i.id AND pi.organization_id=i.organization_id
+    </sql>
+
+    <sql id="visibilityAndFilters">
+        WHERE i.organization_id=#{organizationId}
+          AND (a.applicant_cas_id=#{actorCasId} OR #{unrestricted}=TRUE
+            OR EXISTS(SELECT 1 FROM project_manager pm
+              JOIN organization_member m ON m.id=pm.member_id AND m.organization_id=pm.organization_id
+              WHERE pm.organization_id=i.organization_id AND pm.project_id=p.id
+                AND m.cas_id=#{actorCasId} AND m.status='ACTIVE'
+                AND (m.term_start IS NULL OR m.term_start &lt;= CURRENT_DATE)
+                AND (m.term_end IS NULL OR m.term_end &gt;= CURRENT_DATE))
+            OR EXISTS(SELECT 1 FROM project_access pa
+              JOIN organization_member m ON m.id=pa.member_id AND m.organization_id=pa.organization_id
+              WHERE pa.organization_id=i.organization_id AND pa.project_id=p.id
+                AND m.cas_id=#{actorCasId} AND m.status='ACTIVE'
+                AND pa.access_type IN ('VIEW','REVIEW','MANAGE')
+                AND (m.term_start IS NULL OR m.term_start &lt;= CURRENT_DATE)
+                AND (m.term_end IS NULL OR m.term_end &gt;= CURRENT_DATE)))
+        <if test="filter != null">
+            <if test="filter.projectId != null and filter.projectId != ''">
+                AND p.id=#{filter.projectId}
+            </if>
+            <if test="filter.formId != null and filter.formId != ''">
+                AND af.id=#{filter.formId}
+            </if>
+            <if test="filter.applicantCasId != null and filter.applicantCasId != ''">
+                AND a.applicant_cas_id=#{filter.applicantCasId}
+            </if>
+            <if test="filter.invoiceDateFrom != null">
+                AND i.invoice_date &gt;=#{filter.invoiceDateFrom}
+            </if>
+            <if test="filter.invoiceDateTo != null">
+                AND i.invoice_date &lt;=#{filter.invoiceDateTo}
+            </if>
+            <if test="filter.minClaimedAmount != null">
+                AND i.claimed_amount &gt;=#{filter.minClaimedAmount}
+            </if>
+            <if test="filter.maxClaimedAmount != null">
+                AND i.claimed_amount &lt;=#{filter.maxClaimedAmount}
+            </if>
+            <if test="filter.expenseCategoryItemId != null and filter.expenseCategoryItemId != ''">
+                AND i.expense_category_item_id=#{filter.expenseCategoryItemId}
+            </if>
+            <if test="filter.statuses != null and !filter.statuses.isEmpty()">
+                AND i.status IN
+                <foreach collection="filter.statuses" item="status" open="(" separator="," close=")">
+                    #{status}
+                </foreach>
+            </if>
+            <if test="filter.tagItemId != null and filter.tagItemId != ''">
+                AND EXISTS(SELECT 1 FROM invoice_tag it WHERE it.organization_id=i.organization_id
+                  AND it.invoice_id=i.id AND it.tag_item_id=#{filter.tagItemId})
+            </if>
+            <if test="filter.invoiceType != null and filter.invoiceType != ''">
+                AND i.invoice_type=#{filter.invoiceType}
+            </if>
+            <if test="filter.paperStatus != null and filter.paperStatus != ''">
+                AND COALESCE(pi.status,CASE WHEN p.paper_required=FALSE THEN 'NOT_REQUIRED' ELSE 'PENDING_SETUP' END)
+                  =#{filter.paperStatus}
+            </if>
+            <if test="filter.keyword != null and filter.keyword != ''">
+                AND (i.invoice_code LIKE CONCAT('%',#{filter.keyword},'%')
+                  OR i.invoice_number LIKE CONCAT('%',#{filter.keyword},'%')
+                  OR i.digital_invoice_no LIKE CONCAT('%',#{filter.keyword},'%')
+                  OR i.seller_name LIKE CONCAT('%',#{filter.keyword},'%'))
+            </if>
+        </if>
+    </sql>
+
+    <select id="findInvoices" resultType="cn.sduonline.invoice.data.vo.LedgerInvoiceVO">
+        SELECT i.id invoice_id,i.application_id,p.id project_id,p.name project_name,
+          af.id form_id,af.name form_name,a.applicant_cas_id,u.name applicant_name,
+          i.invoice_type,i.invoice_code,i.invoice_number,i.digital_invoice_no,
+          i.invoice_date,i.seller_name,i.face_amount,i.claimed_amount,
+          i.expense_category_item_id,category.display_name expense_category_name,i.status,
+          COALESCE(pi.status,CASE WHEN p.paper_required=FALSE THEN 'NOT_REQUIRED' ELSE 'PENDING_SETUP' END)
+            paper_status,
+          i.version,i.updated_at
+        <include refid="fromAndJoins"/>
+        <include refid="visibilityAndFilters"/>
+        ORDER BY ${sortColumn} ${sortDirection},i.id DESC
+    </select>
+
+    <select id="calculateTotals" resultType="cn.sduonline.invoice.data.vo.LedgerTotalsVO">
+        SELECT COUNT(*) total,COALESCE(SUM(i.face_amount),0) total_face_amount,
+          COALESCE(SUM(i.claimed_amount),0) total_claimed_amount
+        <include refid="fromAndJoins"/>
+        <include refid="visibilityAndFilters"/>
+    </select>
+
+    <select id="canAccessInvoice" resultType="boolean">
+        SELECT EXISTS(
+          SELECT 1
+          <include refid="fromAndJoins"/>
+          WHERE i.organization_id=#{organizationId} AND i.id=#{invoiceId}
+            AND (a.applicant_cas_id=#{actorCasId} OR #{unrestricted}=TRUE
+              OR EXISTS(SELECT 1 FROM project_manager pm
+                JOIN organization_member m ON m.id=pm.member_id AND m.organization_id=pm.organization_id
+                WHERE pm.organization_id=i.organization_id AND pm.project_id=p.id
+                  AND m.cas_id=#{actorCasId} AND m.status='ACTIVE'
+                  AND (m.term_start IS NULL OR m.term_start &lt;= CURRENT_DATE)
+                  AND (m.term_end IS NULL OR m.term_end &gt;= CURRENT_DATE))
+              OR EXISTS(SELECT 1 FROM project_access pa
+                JOIN organization_member m ON m.id=pa.member_id AND m.organization_id=pa.organization_id
+                WHERE pa.organization_id=i.organization_id AND pa.project_id=p.id
+                  AND m.cas_id=#{actorCasId} AND m.status='ACTIVE'
+                  AND pa.access_type IN ('VIEW','REVIEW','MANAGE')
+                  AND (m.term_start IS NULL OR m.term_start &lt;= CURRENT_DATE)
+                  AND (m.term_end IS NULL OR m.term_end &gt;= CURRENT_DATE)))
+        )
+    </select>
+</mapper>

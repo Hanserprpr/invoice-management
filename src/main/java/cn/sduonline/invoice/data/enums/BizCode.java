@@ -158,6 +158,8 @@ public enum BizCode {
     PAPER_REASON_REQUIRED(61003, "人工修改纸票状态必须填写原因"),
     /** 保存的筛选不存在。 */
     SAVED_FILTER_NOT_FOUND(62000, "保存的筛选不存在"),
+    /** 同名筛选已存在。 */
+    SAVED_FILTER_ALREADY_EXISTS(62001, "同名筛选已存在"),
 
     // ---------- 7xxxx 导出批次、平台外状态、通知与交接 ----------
     /** 导出批次不存在。 */
