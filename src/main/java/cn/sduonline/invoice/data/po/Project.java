@@ -3,6 +3,8 @@ package cn.sduonline.invoice.data.po;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.Version;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -25,13 +27,19 @@ public class Project {
     private String id;
     private String organizationId;
     private String name;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String description;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private BigDecimal budget;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String fundingSource;
     private Boolean paperRequired;
     private String visibility;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String ruleSetVersionId;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Instant startAt;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Instant endAt;
     private String status;
     @Version
@@ -39,5 +47,6 @@ public class Project {
     private String createdByCasId;
     private Instant createdAt;
     private Instant updatedAt;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Instant archivedAt;
 }

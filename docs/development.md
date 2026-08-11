@@ -1,4 +1,4 @@
-# 本地开发与 D0–D1 运行说明
+# 本地开发与 D0–D2 项目模块运行说明
 
 ## MySQL
 
@@ -53,5 +53,13 @@ MYSQL_USERNAME=root MYSQL_PASSWORD=invoice_dev ./mvnw test
 - 成员状态和任期：`PATCH /api/organizations/{id}/members/{casId}`
 - 角色及项目范围：`PUT /api/organizations/{id}/members/{casId}/roles`
 - 平台社团管理：`POST /api/platform/organizations`、`PATCH /api/platform/organizations/{id}`
+- 项目列表和创建：`GET|POST /api/projects`
+- 项目详情和编辑：`GET|PATCH /api/projects/{projectId}`
+- 开放收集：`POST /api/projects/{projectId}/open`
+- 停止收集：`POST /api/projects/{projectId}/stop-collection`
+- 开始整理：`POST /api/projects/{projectId}/start-organizing`
+- 归档项目：`POST /api/projects/{projectId}/archive`
+
+项目创建和编辑支持负责人及 `VIEW/SUBMIT/REVIEW/MANAGE` 范围的完整替换。项目状态不能通过通用编辑接口修改，只能使用上述语义化状态接口；所有编辑和状态接口均要求提交当前 `version`。
 
 除社团列表和平台管理入口外，租户 API 必须携带 `X-Organization-Id`。写接口使用 Cookie CSRF Token，并通过 `X-XSRF-TOKEN` 请求头回传。
