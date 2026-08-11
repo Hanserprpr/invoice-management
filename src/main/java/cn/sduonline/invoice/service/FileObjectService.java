@@ -37,17 +37,20 @@ public class FileObjectService {
     private final AuditService auditService;
     private final LedgerMapper ledgerMapper;
     private final ObjectStorage objectStorage;
+    private final FileScanJobService fileScanJobService;
 
     public FileObjectService(FileObjectMapper fileMapper,
                              AuthorizationService authorizationService,
                              AuditService auditService,
                              LedgerMapper ledgerMapper,
-                             ObjectStorage objectStorage) {
+                             ObjectStorage objectStorage,
+                             FileScanJobService fileScanJobService) {
         this.fileMapper = fileMapper;
         this.authorizationService = authorizationService;
         this.auditService = auditService;
         this.ledgerMapper = ledgerMapper;
         this.objectStorage = objectStorage;
+        this.fileScanJobService = fileScanJobService;
     }
 
     @Transactional
@@ -93,6 +96,7 @@ public class FileObjectService {
             throw new BusinessException(BizCode.STATE_NOT_ALLOWED, HttpStatus.CONFLICT);
         }
         objectStorage.finalizeUpload(file.getStorageKey());
+        fileScanJobService.enqueue(fileId, actorCasId);
         file.setScanStatus("SCANNING");
         auditService.append(organizationId, actorCasId, "FILE_UPLOAD_COMPLETED", "FILE", fileId,
                 "{\"sizeBytes\":" + file.getSizeBytes() + "}");

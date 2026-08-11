@@ -33,6 +33,7 @@ public class AsyncJob {
     private String resultJson;
     private String errorCode;
     private String errorMessage;
+    private Instant nextAttemptAt;
     private String createdByCasId;
     private Instant createdAt;
     private Instant startedAt;

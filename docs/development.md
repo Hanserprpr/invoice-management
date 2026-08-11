@@ -105,7 +105,19 @@ R2 默认关闭，未配置密钥时应用和测试仍可启动，真实上传/�
 - `R2_BUCKET`
 - 可选 `R2_UPLOAD_URL_TTL`（默认 `10m`）和 `R2_DOWNLOAD_URL_TTL`（默认 `5m`）
 
-这些值不得写入配置文件、日志、数据库或 Flyway。R2 桶保持私有；浏览器直传前还需在 R2 配置仅允许前端正式域名、`PUT/GET/HEAD` 和必要请求头的 CORS 规则。当前 SHA-256 元数据用于完成确认，后续内容检测任务仍需对对象正文重新计算摘要并执行类型嗅探和病毒扫描，不能仅信任客户端声明。
+这些值不得写入配置文件、日志、数据库或 Flyway。R2 桶保持私有；浏览器直传前还需在 R2 配置仅允许前端正式域名、`PUT/GET/HEAD` 和必要请求头的 CORS 规则。
+
+上传固化后会创建 `FILE_SECURITY_SCAN` 异步任务。工作线程从 R2 下载正式对象到受控临时文件，重新计算正文 SHA-256、核对真实大小，并通过文件签名识别 PDF、JPEG、PNG；OFD 还必须是包含根 `OFD.xml` 的 ZIP 包。正文与登记信息不一致时转为 `REJECTED`。任务领取使用数据库锁，失败按退避时间最多重试三次，工作线程在访问租户表之前会显式恢复任务中的 `organization_id`；执行节点异常退出留下的 `RUNNING` 任务超过 15 分钟会被重新调度或终止，避免永久卡死。
+
+病毒扫描采用可替换的 ClamAV `INSTREAM` 适配器。默认未启用时，任务结果写入 `MANUAL_REVIEW`，文件保持 `SCANNING`，必须由平台人工检测回写，绝不自动标记安全。启用时配置：
+
+- `CLAMAV_ENABLED=true`
+- `CLAMAV_HOST`（默认 `127.0.0.1`）
+- `CLAMAV_PORT`（默认 `3310`）
+- 可选 `CLAMAV_CONNECT_TIMEOUT`（默认 `3s`）和 `CLAMAV_READ_TIMEOUT`（默认 `2m`）
+- 可选 `FILE_SCAN_WORKER_ENABLED` 和 `FILE_SCAN_POLL_INTERVAL`；前者默认跟随 `R2_ENABLED`，后者默认 `5s`
+
+ClamAV TCP 协议本身不提供认证或加密，只能部署在同机或受控私网，禁止向公网开放。检测临时文件在每次任务结束后都会删除。另有孤立文件清理任务定期处理已过期且未被任何业务表引用的 `PENDING/REJECTED/FAILED` 文件；删除时会锁定数据库记录并再次检查引用，避免清理与业务引用并发时删除有效对象。可通过 `FILE_CLEANUP_ENABLED` 和 `FILE_CLEANUP_INTERVAL` 控制，默认随 R2 启用并每小时运行。
 
 审核入口同时支持社团级 `REVIEWER/CLUB_ADMIN` 与项目级 `REVIEW/MANAGE` 授权。单票结论必须先执行“开始审核”；批量通过会为已提交发票追加隐式 `START_REVIEW` 记录。退回必须使用已发布原因字典并指定可修改字段；申请人只能修改这些发票字段，表单原始答案保持不变。申请状态由所属发票的已提交、审核中、退回、通过、拒绝和作废状态统一派生。
 

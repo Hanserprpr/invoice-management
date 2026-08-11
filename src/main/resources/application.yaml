@@ -19,6 +19,18 @@ server:
   forward-headers-strategy: framework
 
 app:
+  file-scan:
+    worker-enabled: ${FILE_SCAN_WORKER_ENABLED:${R2_ENABLED:false}}
+    poll-interval: ${FILE_SCAN_POLL_INTERVAL:5s}
+    clamav:
+      enabled: ${CLAMAV_ENABLED:false}
+      host: ${CLAMAV_HOST:127.0.0.1}
+      port: ${CLAMAV_PORT:3310}
+      connect-timeout: ${CLAMAV_CONNECT_TIMEOUT:3s}
+      read-timeout: ${CLAMAV_READ_TIMEOUT:2m}
+  file-cleanup:
+    enabled: ${FILE_CLEANUP_ENABLED:${R2_ENABLED:false}}
+    interval: ${FILE_CLEANUP_INTERVAL:1h}
   storage:
     r2:
       enabled: ${R2_ENABLED:false}

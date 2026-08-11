@@ -1,6 +1,7 @@
 package cn.sduonline.invoice.storage;
 
 import java.time.Instant;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -11,6 +12,10 @@ public interface ObjectStorage {
     Optional<StoredObject> headUpload(String key);
 
     void finalizeUpload(String key);
+
+    void downloadTo(String key, Path target);
+
+    void delete(String key);
 
     DownloadGrant createDownloadGrant(String key, String originalName, String contentType);
 

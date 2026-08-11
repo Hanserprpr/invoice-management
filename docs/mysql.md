@@ -560,6 +560,7 @@ CREATE TABLE async_job (
     result_json JSON NULL,
     error_code VARCHAR(80) NULL,
     error_message VARCHAR(1000) NULL,
+    next_attempt_at DATETIME(3) NULL,
     created_by_cas_id VARCHAR(20) NULL,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     started_at DATETIME(3) NULL,
@@ -572,6 +573,7 @@ CREATE TABLE async_job (
         CHECK (status IN ('PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')),
     CONSTRAINT ck_job_progress CHECK (progress <= 100),
     INDEX idx_job_dispatch (status, job_type, created_at),
+    INDEX idx_job_retry (status, job_type, next_attempt_at, created_at),
     INDEX idx_job_target (target_type, target_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```

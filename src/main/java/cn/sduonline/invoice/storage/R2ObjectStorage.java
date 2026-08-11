@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.exception.SdkException;
+import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
@@ -25,6 +26,10 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.io.IOException;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
@@ -121,6 +126,29 @@ final class R2ObjectStorage implements ObjectStorage, AutoCloseable {
 
     private String uploadKey(String key) {
         return key + ".upload";
+    }
+
+    @Override
+    public void downloadTo(String key, Path target) {
+        try (var output = Files.newOutputStream(target, StandardOpenOption.TRUNCATE_EXISTING)) {
+            client.getObject(GetObjectRequest.builder()
+                            .bucket(properties.getBucket()).key(key).build(),
+                    ResponseTransformer.toOutputStream(output));
+        } catch (SdkException | IOException exception) {
+            throw unavailable();
+        }
+    }
+
+    @Override
+    public void delete(String key) {
+        try {
+            client.deleteObject(DeleteObjectRequest.builder()
+                    .bucket(properties.getBucket()).key(key).build());
+            client.deleteObject(DeleteObjectRequest.builder()
+                    .bucket(properties.getBucket()).key(uploadKey(key)).build());
+        } catch (SdkException exception) {
+            throw unavailable();
+        }
     }
 
     @Override

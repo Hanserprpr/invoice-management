@@ -5,6 +5,7 @@ import cn.sduonline.invoice.exception.BusinessException;
 import org.springframework.http.HttpStatus;
 
 import java.util.Optional;
+import java.nio.file.Path;
 
 final class DisabledObjectStorage implements ObjectStorage {
     @Override
@@ -19,6 +20,16 @@ final class DisabledObjectStorage implements ObjectStorage {
 
     @Override
     public void finalizeUpload(String key) {
+        throw unavailable();
+    }
+
+    @Override
+    public void downloadTo(String key, Path target) {
+        throw unavailable();
+    }
+
+    @Override
+    public void delete(String key) {
         throw unavailable();
     }
 
