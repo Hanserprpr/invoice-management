@@ -38,6 +38,8 @@ public class ReviewService {
     private final InvoiceService invoiceService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
+    private final InvoicePrecheckService precheckService;
+    private final PaperService paperService;
 
     public ReviewService(ClubReviewMapper reviewMapper,
                          InvoiceMapper invoiceMapper,
@@ -48,7 +50,9 @@ public class ReviewService {
                          AuthorizationService authorizationService,
                          InvoiceService invoiceService,
                          AuditService auditService,
-                         ObjectMapper objectMapper) {
+                         ObjectMapper objectMapper,
+                         InvoicePrecheckService precheckService,
+                         PaperService paperService) {
         this.reviewMapper = reviewMapper;
         this.invoiceMapper = invoiceMapper;
         this.applicationMapper = applicationMapper;
@@ -59,6 +63,8 @@ public class ReviewService {
         this.invoiceService = invoiceService;
         this.auditService = auditService;
         this.objectMapper = objectMapper;
+        this.precheckService = precheckService;
+        this.paperService = paperService;
     }
 
     public PageResult<ReviewQueueItemVO> queue(long page, long pageSize, String projectId,
@@ -97,6 +103,7 @@ public class ReviewService {
         requireVersion(invoice, request.version());
         if ("IN_REVIEW".equals(invoice.getStatus())) return detail(invoiceId);
         if (!"SUBMITTED".equals(invoice.getStatus())) state();
+        precheckService.run(invoiceId, actorCasId);
         invoice.setStatus("IN_REVIEW");
         updateInvoice(invoice, request.version());
         append(invoice, actorCasId, "START_REVIEW", null, null, null, null);
@@ -121,6 +128,7 @@ public class ReviewService {
         updateInvoice(invoice, request.version());
         append(invoice, actorCasId, "APPROVE", null, null, null, null);
         refreshApplication(invoice);
+        paperService.ensureForApproved(invoiceId, actorCasId);
         audit(invoice, actorCasId, "INVOICE_REVIEW_APPROVED");
         return detail(invoiceId);
     }
@@ -179,6 +187,7 @@ public class ReviewService {
             requireVersion(invoice, item.version());
             boolean implicitStart = "SUBMITTED".equals(invoice.getStatus());
             if (!implicitStart && !"IN_REVIEW".equals(invoice.getStatus())) state();
+            if (implicitStart) precheckService.run(invoice.getId(), actorCasId);
             requireNoBlockingPrecheck(invoice);
             if (implicitStart) {
                 append(invoice, actorCasId, "START_REVIEW", null, null, null, batchId);
@@ -187,6 +196,7 @@ public class ReviewService {
             updateInvoice(invoice, item.version());
             append(invoice, actorCasId, "APPROVE", null, null, null, batchId);
             refreshApplication(invoice);
+            paperService.ensureForApproved(invoice.getId(), actorCasId);
             audit(invoice, actorCasId, "INVOICE_REVIEW_APPROVED");
         }
         return request.invoices().stream().map(item -> detail(item.invoiceId())).toList();

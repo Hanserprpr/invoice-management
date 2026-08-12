@@ -69,4 +69,14 @@ public interface AsyncJobMapper extends BaseMapper<AsyncJob> {
     List<AsyncJob> findStaleRunning(@Param("jobType") String jobType,
                                     @Param("staleBefore") Instant staleBefore,
                                     @Param("limit") int limit);
+
+    @Select("""
+            SELECT * FROM async_job WHERE organization_id=#{organizationId}
+              AND job_type=#{jobType} AND target_type=#{targetType} AND target_id=#{targetId}
+              AND status IN ('PENDING','RUNNING') ORDER BY created_at DESC LIMIT 1
+            """)
+    AsyncJob findActiveForTarget(@Param("organizationId") String organizationId,
+                                 @Param("jobType") String jobType,
+                                 @Param("targetType") String targetType,
+                                 @Param("targetId") String targetId);
 }

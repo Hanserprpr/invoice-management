@@ -30,11 +30,19 @@ public final class ProjectDtos {
             @DecimalMin("0.00") @Digits(integer = 10, fraction = 2) BigDecimal budget,
             @Size(max = 200) String fundingSource,
             Boolean paperRequired,
+            String ruleSetVersionId,
             @NotBlank @Pattern(regexp = "ALL|AUTHORIZED") String visibility,
             Instant startAt,
             Instant endAt,
             @NotEmpty List<@Pattern(regexp = "^[A-Za-z0-9_-]{1,20}$") String> managerCasIds,
             @NotNull List<@Valid AccessGrant> accessGrants) {
+        public CreateProjectRequest(String name, String description, BigDecimal budget,
+                                    String fundingSource, Boolean paperRequired, String visibility,
+                                    Instant startAt, Instant endAt, List<String> managerCasIds,
+                                    List<AccessGrant> accessGrants) {
+            this(name, description, budget, fundingSource, paperRequired, null, visibility,
+                    startAt, endAt, managerCasIds, accessGrants);
+        }
     }
 
     public record UpdateProjectRequest(
@@ -46,6 +54,8 @@ public final class ProjectDtos {
             @Size(max = 200) String fundingSource,
             boolean clearFundingSource,
             Boolean paperRequired,
+            String ruleSetVersionId,
+            boolean clearRuleSetVersion,
             @Pattern(regexp = "ALL|AUTHORIZED") String visibility,
             Instant startAt,
             Instant endAt,
@@ -54,6 +64,16 @@ public final class ProjectDtos {
             List<@Pattern(regexp = "^[A-Za-z0-9_-]{1,20}$") String> managerCasIds,
             List<@Valid AccessGrant> accessGrants,
             @NotNull @Min(0) Long version) {
+        public UpdateProjectRequest(String name, String description, boolean clearDescription,
+                                    BigDecimal budget, boolean clearBudget, String fundingSource,
+                                    boolean clearFundingSource, Boolean paperRequired, String visibility,
+                                    Instant startAt, Instant endAt, boolean clearStartAt,
+                                    boolean clearEndAt, List<String> managerCasIds,
+                                    List<AccessGrant> accessGrants, Long version) {
+            this(name, description, clearDescription, budget, clearBudget, fundingSource,
+                    clearFundingSource, paperRequired, null, false, visibility, startAt, endAt,
+                    clearStartAt, clearEndAt, managerCasIds, accessGrants, version);
+        }
     }
 
     public record ChangeStateRequest(@NotNull @Min(0) Long version) {

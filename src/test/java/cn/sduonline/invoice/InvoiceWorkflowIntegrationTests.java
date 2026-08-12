@@ -6,6 +6,7 @@ import cn.sduonline.invoice.data.dto.FileDtos.InspectFileRequest;
 import cn.sduonline.invoice.data.dto.FileDtos.RegisterFileRequest;
 import cn.sduonline.invoice.data.dto.FormDtos.*;
 import cn.sduonline.invoice.data.dto.InvoiceDtos.*;
+import cn.sduonline.invoice.data.dto.RecognitionDtos.*;
 import cn.sduonline.invoice.data.dto.OrganizationDtos.*;
 import cn.sduonline.invoice.data.dto.ProjectDtos.ChangeStateRequest;
 import cn.sduonline.invoice.data.dto.ProjectDtos.CreateProjectRequest;
@@ -18,6 +19,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -26,6 +31,13 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
+import java.util.Map;
+import java.util.Optional;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import cn.sduonline.invoice.storage.ObjectStorage;
+import cn.sduonline.invoice.recognition.InvoiceRecognitionAdapter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -35,6 +47,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "app.security.oidc.client-secret=test-client-secret"
 })
 @EnabledIfEnvironmentVariable(named = "MYSQL_URL", matches = ".*_test.*")
+@Import(InvoiceWorkflowIntegrationTests.RecognitionTestConfiguration.class)
 class InvoiceWorkflowIntegrationTests {
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired OrganizationService organizationService;
@@ -45,6 +58,8 @@ class InvoiceWorkflowIntegrationTests {
     @Autowired FileObjectService fileService;
     @Autowired InvoiceService invoiceService;
     @Autowired ObjectMapper objectMapper;
+    @Autowired RecognitionService recognitionService;
+    @Autowired RecognitionWorker recognitionWorker;
 
     @BeforeEach
     void requireDedicatedTestDatabase() {
@@ -95,6 +110,7 @@ class InvoiceWorkflowIntegrationTests {
 
         var original = fileService.inspect(platform, organization.id(),
                 fileIdByHash(organization.id(), "a"), new InspectFileRequest("READY", null));
+        String recognitionJobId;
         try (TenantContext.Scope ignored = TenantContext.open(organization.id(), member)) {
             assertThatThrownBy(() -> invoiceService.create(applicationId, member,
                     invoiceRequest(original.id(), "100.00", "120.00")))
@@ -109,6 +125,25 @@ class InvoiceWorkflowIntegrationTests {
                     invoiceRequest(original.id(), "100.00", "70.00")))
                     .isInstanceOfSatisfying(BusinessException.class,
                             exception -> assertThat(exception.getBizCode()).isEqualTo(BizCode.FILE_ALREADY_USED));
+            var recognitionJob = recognitionService.start(invoiceId, member);
+            recognitionJobId = recognitionJob.id();
+            assertThat(recognitionService.start(invoiceId, member).id()).isEqualTo(recognitionJob.id());
+        }
+        assertThat(recognitionWorker.processNext()).isTrue();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT CONCAT(status,':',COALESCE(error_code,''),':',COALESCE(error_message,'')) FROM async_job WHERE id=?",
+                String.class, recognitionJobId)).isEqualTo("SUCCEEDED::");
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), member)) {
+            var suggestions = recognitionService.suggestions(invoiceId);
+            assertThat(suggestions).extracting("fieldPath")
+                    .containsExactlyInAnyOrder("sellerName", "faceAmount");
+            var sellerSuggestion = suggestions.stream()
+                    .filter(item -> item.fieldPath().equals("sellerName")).findFirst().orElseThrow();
+            recognitionService.confirm(invoiceId, member, new ConfirmSuggestionsRequest(List.of(
+                    new SuggestionDecision(sellerSuggestion.id(), "CORRECTED", "修正供应商"))));
+            assertThat(recognitionService.suggestions(invoiceId).stream()
+                    .filter(item -> item.id().equals(sellerSuggestion.id())).findFirst().orElseThrow()
+                    .finalValue()).isEqualTo("修正供应商");
             register(member, "payment.png", "image/png", "b", "PAYMENT_RECORD");
             register(member, "replacement.ofd", "application/ofd", "c", "INVOICE_ORIGINAL");
         }
@@ -171,5 +206,48 @@ class InvoiceWorkflowIntegrationTests {
         return new CreateInvoiceRequest("VAT_ELECTRONIC", "3700", "10001", null,
                 LocalDate.of(2026, 8, 1), "山东大学", null, "测试供应商", null,
                 new BigDecimal(face), new BigDecimal(claimed), fileId, null);
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class RecognitionTestConfiguration {
+        @Bean
+        @Primary
+        ObjectStorage recognitionObjectStorage() {
+            return new ObjectStorage() {
+                @Override public UploadGrant createUploadGrant(String key, String contentType,
+                                                                 long sizeBytes, String sha256) {
+                    throw new UnsupportedOperationException();
+                }
+                @Override public Optional<StoredObject> headUpload(String key) { return Optional.empty(); }
+                @Override public void finalizeUpload(String key) { }
+                @Override public void downloadTo(String key, Path target) {
+                    try {
+                        Files.writeString(target, "%PDF-1.7\nrecognition\n%%EOF",
+                                StandardCharsets.US_ASCII);
+                    } catch (java.io.IOException exception) {
+                        throw new IllegalStateException(exception);
+                    }
+                }
+                @Override public void delete(String key) { }
+                @Override public DownloadGrant createDownloadGrant(String key, String originalName,
+                                                                     String contentType) {
+                    throw new UnsupportedOperationException();
+                }
+            };
+        }
+
+        @Bean
+        @Primary
+        InvoiceRecognitionAdapter recognitionAdapter() {
+            return (file, contentType) -> new InvoiceRecognitionAdapter.RecognitionResult(
+                    "山东大学 测试供应商 100.00", "qr-original",
+                    Map.of(
+                            "sellerName", new InvoiceRecognitionAdapter.SuggestedField(
+                                    "测试供应商", new BigDecimal("0.9800")),
+                            "faceAmount", new InvoiceRecognitionAdapter.SuggestedField(
+                                    "100.00", new BigDecimal("0.9900")),
+                            "ignoredField", new InvoiceRecognitionAdapter.SuggestedField(
+                                    "ignored", BigDecimal.ONE)), true);
+        }
     }
 }

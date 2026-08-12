@@ -13,6 +13,7 @@ public record ProjectVO(
         BigDecimal budget,
         String fundingSource,
         boolean paperRequired,
+        String ruleSetVersionId,
         String visibility,
         Instant startAt,
         Instant endAt,

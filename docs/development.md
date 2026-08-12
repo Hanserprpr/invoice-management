@@ -1,4 +1,4 @@
-# 本地开发与 D0–D2 项目模块运行说明
+# 本地开发与 D0–D3 运行说明
 
 ## MySQL
 
@@ -87,6 +87,16 @@ MYSQL_USERNAME=root MYSQL_PASSWORD=invoice_dev ./mvnw test
 - 发票台账、筛选、排序与金额合计：`GET /api/ledger/invoices`
 - 单票聚合时间线：`GET /api/ledger/invoices/{invoiceId}/timeline`
 - 本人保存筛选：`GET|POST /api/ledger/saved-filters`、`PATCH|DELETE /api/ledger/saved-filters/{filterId}`
+- 发票识别任务、任务历史与建议：`POST /api/invoices/{invoiceId}/recognition`、`GET /api/invoices/{invoiceId}/recognition/jobs|suggestions`
+- 人工确认识别建议：`PUT /api/invoices/{invoiceId}/recognition/suggestions`
+- 运行和查看预检：`POST|GET /api/invoices/{invoiceId}/prechecks`
+- 处理预检命中：`POST /api/invoices/{invoiceId}/prechecks/{resultId}/resolve`
+- 规则集列表和创建：`GET|POST /api/rule-sets`
+- 编辑规则集、发布不可变版本：`PATCH /api/rule-sets/{id}`、`POST /api/rule-sets/{id}/versions`
+- 单票纸票详情：`GET /api/invoices/{invoiceId}/paper`
+- 项目纸票列表与连续扫码：`GET /api/projects/{projectId}/paper-items`、`POST /api/projects/{projectId}/paper/scans`
+- 社员声明/撤销、社团收取：`POST /api/invoices/{invoiceId}/paper/declare|revoke-declaration|receive`
+- 纸票退回、异常、更正、移交和归档：`POST /api/invoices/{invoiceId}/paper/state`
 
 项目创建和编辑支持负责人及 `VIEW/SUBMIT/REVIEW/MANAGE` 范围的完整替换。项目状态不能通过通用编辑接口修改，只能使用上述语义化状态接口；所有编辑和状态接口均要求提交当前 `version`。
 
@@ -108,6 +118,14 @@ R2 默认关闭，未配置密钥时应用和测试仍可启动，真实上传/�
 这些值不得写入配置文件、日志、数据库或 Flyway。R2 桶保持私有；浏览器直传前还需在 R2 配置仅允许前端正式域名、`PUT/GET/HEAD` 和必要请求头的 CORS 规则。
 
 上传固化后会创建 `FILE_SECURITY_SCAN` 异步任务。工作线程从 R2 下载正式对象到受控临时文件，重新计算正文 SHA-256、核对真实大小，并通过文件签名识别 PDF、JPEG、PNG；OFD 还必须是包含根 `OFD.xml` 的 ZIP 包。正文与登记信息不一致时转为 `REJECTED`。任务领取使用数据库锁，失败按退避时间最多重试三次，工作线程在访问租户表之前会显式恢复任务中的 `organization_id`；执行节点异常退出留下的 `RUNNING` 任务超过 15 分钟会被重新调度或终止，避免永久卡死。
+
+安全检测通过后，可调用 `POST /api/invoices/{invoiceId}/recognition` 创建识别任务。同一张发票已有等待中或执行中的任务时会返回原任务，避免重复提交。识别服务通过 `OCR_ENDPOINT` 适配外部 OCR/二维码提供方，请求正文为文件字节，响应字段为 `rawText`、`qrRaw` 和 `fields`；每个建议字段包含 `value` 与 `confidence`。服务端只接受发票字段白名单，识别原文保存在内部任务结果中，结构化建议保存在 `recognition_suggestion`，人工通过 `PUT /api/invoices/{invoiceId}/recognition/suggestions` 逐条接受、更正或拒绝。未配置 OCR 时任务成功进入 `MANUAL_ENTRY`，不会阻断人工录入。
+
+识别相关环境变量：`OCR_ENABLED`、`OCR_ENDPOINT`、`OCR_API_KEY`、`OCR_TIMEOUT`、`OCR_WORKER_ENABLED`、`OCR_POLL_INTERVAL`。生产环境应让 OCR 服务端点只接受受信网络调用，并定期轮换密钥。
+
+规则集由社团管理员维护，版本一经发布不提供修改接口。项目通过 `ruleSetVersionId` 固定引用已经生效的版本；后续发布不会改变历史项目。当前规则支持票面金额上限、申请金额上限、允许的发票类型、必填销售方税号和必填购买方税号，并为每条规则指定 `BLOCK/WARNING/INFO`。开始审核时自动执行规则与查重，完全相同的数电票号、代码加号码或原文件摘要产生阻断，销售方税号、日期和金额相同产生警告。结果只追加保存；审核只读取当前规则版本和每类最新结果。跨社团命中不会在 API 中返回另一社团的发票 ID 或内容。
+
+项目创建或编辑时可启用 `paperRequired`。启用后，发票内部通过会幂等创建 `PENDING_DELIVERY` 纸票记录；社员可声明已交及在社团确认前撤销，具备项目审核权限的成员可手工或扫码确认收取，项目管理员可记录退回、异常、更正、外部移交和归档。每次变化同时追加 `paper_event` 和审计日志，写入使用独立的 `paper_item.version` 乐观锁。扫码原文不会落库，只保存 SHA-256 与解析后的最小票据标识；未启用纸票的项目会拒绝全部纸票操作。
 
 病毒扫描采用可替换的 ClamAV `INSTREAM` 适配器。默认未启用时，任务结果写入 `MANUAL_REVIEW`，文件保持 `SCANNING`，必须由平台人工检测回写，绝不自动标记安全。启用时配置：
 

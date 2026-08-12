@@ -11,10 +11,14 @@ import cn.sduonline.invoice.data.dto.OrganizationDtos.*;
 import cn.sduonline.invoice.data.dto.ProjectDtos.ChangeStateRequest;
 import cn.sduonline.invoice.data.dto.ProjectDtos.CreateProjectRequest;
 import cn.sduonline.invoice.data.dto.ReviewDtos.*;
+import cn.sduonline.invoice.data.dto.RuleDtos.*;
+import cn.sduonline.invoice.data.dto.PaperDtos.*;
+import cn.sduonline.invoice.data.dto.PrecheckDtos.*;
 import cn.sduonline.invoice.data.enums.BizCode;
 import cn.sduonline.invoice.exception.BusinessException;
 import cn.sduonline.invoice.service.*;
 import cn.sduonline.invoice.tenant.TenantContext;
+import cn.sduonline.invoice.util.UlidGenerator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -26,6 +30,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 
@@ -47,6 +52,9 @@ class ReviewWorkflowIntegrationTests {
     @Autowired FileObjectService fileService;
     @Autowired InvoiceService invoiceService;
     @Autowired ReviewService reviewService;
+    @Autowired RuleSetService ruleSetService;
+    @Autowired InvoicePrecheckService precheckService;
+    @Autowired PaperService paperService;
     @Autowired ObjectMapper objectMapper;
 
     @BeforeEach
@@ -79,8 +87,14 @@ class ReviewWorkflowIntegrationTests {
                     new CreateMemberRequest(scopedReviewer, "项目审核人", null, null));
             memberService.create(organization.id(), admin,
                     new CreateMemberRequest(ordinary, "普通成员", null, null));
+            var ruleSet = ruleSetService.create(admin,
+                    new CreateRuleSetRequest("审核测试规则", true));
+            var ruleVersion = ruleSetService.publish(ruleSet.id(), admin,
+                    new PublishRuleVersionRequest(List.of(new RuleDefinition(
+                            "REQUIRE_SELLER_TAX_NO", "WARNING", null, null)),
+                            Instant.now().minusSeconds(1)));
             var project = projectService.create(admin, new CreateProjectRequest(
-                    "审核测试项目", null, null, null, false, "ALL", null, null,
+                    "审核测试项目", null, null, null, true, ruleVersion.id(), "ALL", null, null,
                     List.of(admin), List.of()));
             projectId = project.id();
             memberService.replaceRoles(organization.id(), reviewer, admin,
@@ -183,6 +197,13 @@ class ReviewWorkflowIntegrationTests {
             assertThat(approved.invoice().status()).isEqualTo("INTERNALLY_APPROVED");
             assertThat(approved.internalNote()).isEqualTo("已复核金额");
             assertThat(applicationStatus(applicationId)).isEqualTo("PROCESSING");
+            assertThat(precheckService.list(invoiceOne))
+                    .anySatisfy(result -> {
+                        assertThat(result.ruleCode()).isEqualTo("REQUIRE_SELLER_TAX_NO");
+                        assertThat(result.result()).isEqualTo("HIT");
+                        assertThat(result.severity()).isEqualTo("WARNING");
+                    });
+            assertThat(paperService.detail(invoiceOne).status()).isEqualTo("PENDING_DELIVERY");
 
             var batch = reviewService.batchApprove(reviewer,
                     new BatchApproveRequest(List.of(new BatchApproveItem(invoiceTwo, 1L))));
@@ -200,6 +221,39 @@ class ReviewWorkflowIntegrationTests {
         try (TenantContext.Scope ignored = TenantContext.open(organization.id(), applicant)) {
             assertThat(reviewService.history(invoiceOne)).extracting("action")
                     .containsExactly("START_REVIEW", "RETURN", "START_REVIEW", "APPROVE");
+            assertThat(paperService.declare(invoiceOne, applicant,
+                    new PaperVersionRequest(0L)).status()).isEqualTo("MEMBER_DECLARED");
+        }
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), reviewer)) {
+            var scan = paperService.scan(projectId, reviewer,
+                    new PaperScanRequest("invoiceCode=3700&invoiceNumber=R-001"));
+            assertThat(scan.result()).isEqualTo("SUCCESS");
+            assertThat(scan.paperItem().status()).isEqualTo("CLUB_RECEIVED");
+            assertThat(paperService.scan(projectId, reviewer,
+                    new PaperScanRequest("invoiceCode=3700&invoiceNumber=R-001")).result())
+                    .isEqualTo("ALREADY_SCANNED");
+
+            String duplicateId = UlidGenerator.next();
+            jdbcTemplate.update("""
+                    INSERT INTO invoice(id,organization_id,application_id,invoice_type,
+                      invoice_code,invoice_number,invoice_date,seller_name,face_amount,
+                      claimed_amount,current_file_id,status,version)
+                    SELECT ?,organization_id,application_id,invoice_type,invoice_code,
+                      invoice_number,invoice_date,seller_name,face_amount,claimed_amount,
+                      current_file_id,'SUBMITTED',0 FROM invoice WHERE id=?
+                    """, duplicateId, invoiceOne);
+            var duplicateResults = precheckService.run(duplicateId, reviewer);
+            var exact = duplicateResults.stream()
+                    .filter(result -> "EXACT_DUPLICATE".equals(result.checkType()))
+                    .findFirst().orElseThrow();
+            assertThat(exact.result()).isEqualTo("HIT");
+            assertThat(exact.reason()).doesNotContain(invoiceOne);
+            precheckService.resolve(duplicateId, exact.id(), reviewer,
+                    new ResolvePrecheckRequest("FALSE_POSITIVE", "已核对为测试票据"));
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM invoice_precheck_result
+                    WHERE invoice_id=? AND severity='BLOCK' AND result='HIT' AND resolution IS NULL
+                    """, Integer.class, duplicateId)).isZero();
         }
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM audit_log WHERE organization_id=?

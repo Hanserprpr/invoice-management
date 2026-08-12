@@ -19,6 +19,14 @@ server:
   forward-headers-strategy: framework
 
 app:
+  recognition:
+    worker-enabled: ${OCR_WORKER_ENABLED:${R2_ENABLED:false}}
+    poll-interval: ${OCR_POLL_INTERVAL:5s}
+    ocr:
+      enabled: ${OCR_ENABLED:false}
+      endpoint: ${OCR_ENDPOINT:}
+      api-key: ${OCR_API_KEY:}
+      timeout: ${OCR_TIMEOUT:30s}
   file-scan:
     worker-enabled: ${FILE_SCAN_WORKER_ENABLED:${R2_ENABLED:false}}
     poll-interval: ${FILE_SCAN_POLL_INTERVAL:5s}

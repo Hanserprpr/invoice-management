@@ -46,19 +46,22 @@ public class ProjectService {
     private final OrganizationMemberMapper memberMapper;
     private final AuthorizationService authorizationService;
     private final AuditService auditService;
+    private final RuleSetService ruleSetService;
 
     public ProjectService(ProjectMapper projectMapper,
                           ProjectManagerMapper projectManagerMapper,
                           ProjectAccessMapper projectAccessMapper,
                           OrganizationMemberMapper memberMapper,
                           AuthorizationService authorizationService,
-                          AuditService auditService) {
+                          AuditService auditService,
+                          RuleSetService ruleSetService) {
         this.projectMapper = projectMapper;
         this.projectManagerMapper = projectManagerMapper;
         this.projectAccessMapper = projectAccessMapper;
         this.memberMapper = memberMapper;
         this.authorizationService = authorizationService;
         this.auditService = auditService;
+        this.ruleSetService = ruleSetService;
     }
 
     public PageResult<ProjectVO> list(long page, long pageSize, String status) {
@@ -96,6 +99,7 @@ public class ProjectService {
                 .budget(request.budget())
                 .fundingSource(request.fundingSource())
                 .paperRequired(Boolean.TRUE.equals(request.paperRequired()))
+                .ruleSetVersionId(validateRuleVersion(request.ruleSetVersionId()))
                 .visibility(request.visibility())
                 .startAt(request.startAt())
                 .endAt(request.endAt())
@@ -131,6 +135,10 @@ public class ProjectService {
         if (request.clearFundingSource()) project.setFundingSource(null);
         else if (request.fundingSource() != null) project.setFundingSource(request.fundingSource());
         if (request.paperRequired() != null) project.setPaperRequired(request.paperRequired());
+        if (request.clearRuleSetVersion()) project.setRuleSetVersionId(null);
+        else if (request.ruleSetVersionId() != null) {
+            project.setRuleSetVersionId(validateRuleVersion(request.ruleSetVersionId()));
+        }
         if (request.visibility() != null) project.setVisibility(request.visibility());
         Instant start = request.clearStartAt() ? null
                 : request.startAt() == null ? project.getStartAt() : request.startAt();
@@ -286,11 +294,17 @@ public class ProjectService {
                 .map(entry -> new AccessGrantVO(entry.getKey(), entry.getValue())).toList();
         return new ProjectVO(project.getId(), project.getOrganizationId(), project.getName(),
                 project.getDescription(), project.getBudget(), project.getFundingSource(),
-                Boolean.TRUE.equals(project.getPaperRequired()), project.getVisibility(),
+                Boolean.TRUE.equals(project.getPaperRequired()), project.getRuleSetVersionId(),
+                project.getVisibility(),
                 project.getStartAt(), project.getEndAt(), project.getStatus(),
                 project.getVersion() == null ? 0 : project.getVersion(), project.getCreatedByCasId(),
                 project.getCreatedAt(), project.getUpdatedAt(), project.getArchivedAt(),
                 projectMapper.findManagerCasIds(project.getOrganizationId(), project.getId()), access);
+    }
+
+    private String validateRuleVersion(String versionId) {
+        if (versionId == null || versionId.isBlank()) return null;
+        return ruleSetService.requireEffectiveVersion(versionId.trim()).getId();
     }
 
     private void validatePeriod(Instant start, Instant end) {
