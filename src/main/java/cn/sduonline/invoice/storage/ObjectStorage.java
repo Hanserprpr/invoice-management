@@ -15,6 +15,10 @@ public interface ObjectStorage {
 
     void downloadTo(String key, Path target);
 
+    default void uploadFrom(String key, Path source, String contentType, String sha256) {
+        throw new UnsupportedOperationException("server-side upload is not supported");
+    }
+
     void delete(String key);
 
     DownloadGrant createDownloadGrant(String key, String originalName, String contentType);

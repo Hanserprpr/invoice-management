@@ -1,4 +1,4 @@
-# 本地开发与 D0–D3 运行说明
+# 本地开发与 D0–D4 运行说明
 
 ## MySQL
 
@@ -97,6 +97,14 @@ MYSQL_USERNAME=root MYSQL_PASSWORD=invoice_dev ./mvnw test
 - 项目纸票列表与连续扫码：`GET /api/projects/{projectId}/paper-items`、`POST /api/projects/{projectId}/paper/scans`
 - 社员声明/撤销、社团收取：`POST /api/invoices/{invoiceId}/paper/declare|revoke-declaration|receive`
 - 纸票退回、异常、更正、移交和归档：`POST /api/invoices/{invoiceId}/paper/state`
+- 导出批次列表、创建和详情：`GET|POST /api/export-batches`、`GET /api/export-batches/{batchId}`
+- 异步生成、建立新修订、取消、完成和归档：`POST /api/export-batches/{batchId}/generate|revisions|cancel|complete|archive`
+- 导出产物安全下载：`GET /api/export-batches/{batchId}/artifacts/{artifactId}/download-url`
+- 平台外状态历史和追加：`GET|POST /api/export-batches/{batchId}/external-events`
+- 更正平台外事件：`POST /api/export-batches/{batchId}/external-events/{eventId}/corrections`
+- 通知列表、已读和忽略：`GET /api/notifications`、`POST /api/notifications/{id}/read|dismiss`
+- 换届交接列表和执行：`GET|POST /api/handovers`
+- 审计日志只读查询：`GET /api/audit-logs`
 
 项目创建和编辑支持负责人及 `VIEW/SUBMIT/REVIEW/MANAGE` 范围的完整替换。项目状态不能通过通用编辑接口修改，只能使用上述语义化状态接口；所有编辑和状态接口均要求提交当前 `version`。
 
@@ -136,6 +144,10 @@ R2 默认关闭，未配置密钥时应用和测试仍可启动，真实上传/�
 - 可选 `FILE_SCAN_WORKER_ENABLED` 和 `FILE_SCAN_POLL_INTERVAL`；前者默认跟随 `R2_ENABLED`，后者默认 `5s`
 
 ClamAV TCP 协议本身不提供认证或加密，只能部署在同机或受控私网，禁止向公网开放。检测临时文件在每次任务结束后都会删除。另有孤立文件清理任务定期处理已过期且未被任何业务表引用的 `PENDING/REJECTED/FAILED` 文件；删除时会锁定数据库记录并再次检查引用，避免清理与业务引用并发时删除有效对象。可通过 `FILE_CLEANUP_ENABLED` 和 `FILE_CLEANUP_INTERVAL` 控制，默认随 R2 启用并每小时运行。
+
+导出生成使用 `EXPORT_GENERATION` 异步任务，从 R2 读取选中发票的原票和有效附件，生成台账 XLSX、清单 PDF、附件 ZIP 与 `manifest.json`，每个产物都记录 SHA-256 并由服务端直接上传私有 R2。可通过 `EXPORT_WORKER_ENABLED` 和 `EXPORT_POLL_INTERVAL` 控制工作线程，前者默认跟随 `R2_ENABLED`。同一发票由 `invoice_export_reservation` 防止进入两个活动批次；取消释放占用，完成和归档保留追溯，新修订会归档旧版本并原子转移占用。
+
+通知首先写入站内收件箱，再创建 `NOTIFICATION_DELIVERY` 异步任务。默认投递适配器返回 `IN_APP_ONLY`；如需接企业微信、短信或邮件网关，可配置 `NOTIFICATION_DELIVERY_ENABLED=true`、`NOTIFICATION_DELIVERY_ENDPOINT`、`NOTIFICATION_DELIVERY_API_KEY`、`NOTIFICATION_DELIVERY_TIMEOUT`，并通过 `NOTIFICATION_WORKER_ENABLED` 与 `NOTIFICATION_POLL_INTERVAL` 启动重试工作线程。通知正文和日志不得包含文件内容、令牌或跨租户数据。
 
 审核入口同时支持社团级 `REVIEWER/CLUB_ADMIN` 与项目级 `REVIEW/MANAGE` 授权。单票结论必须先执行“开始审核”；批量通过会为已提交发票追加隐式 `START_REVIEW` 记录。退回必须使用已发布原因字典并指定可修改字段；申请人只能修改这些发票字段，表单原始答案保持不变。申请状态由所属发票的已提交、审核中、退回、通过、拒绝和作废状态统一派生。
 

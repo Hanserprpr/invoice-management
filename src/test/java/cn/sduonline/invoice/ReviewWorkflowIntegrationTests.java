@@ -14,6 +14,9 @@ import cn.sduonline.invoice.data.dto.ReviewDtos.*;
 import cn.sduonline.invoice.data.dto.RuleDtos.*;
 import cn.sduonline.invoice.data.dto.PaperDtos.*;
 import cn.sduonline.invoice.data.dto.PrecheckDtos.*;
+import cn.sduonline.invoice.data.dto.ExportDtos.*;
+import cn.sduonline.invoice.data.dto.ExternalStatusDtos.*;
+import cn.sduonline.invoice.data.dto.HandoverDtos.*;
 import cn.sduonline.invoice.data.enums.BizCode;
 import cn.sduonline.invoice.exception.BusinessException;
 import cn.sduonline.invoice.service.*;
@@ -24,6 +27,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -33,6 +39,13 @@ import java.time.LocalDate;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
+import java.util.Map;
+import java.util.Optional;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.io.IOException;
+import cn.sduonline.invoice.storage.ObjectStorage;
+import cn.sduonline.invoice.data.vo.ExportBatchVO;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,6 +54,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
         "app.security.oidc.client-id=test-client-id",
         "app.security.oidc.client-secret=test-client-secret"
 })
+@org.springframework.context.annotation.Import(ReviewWorkflowIntegrationTests.D4TestConfiguration.class)
 @EnabledIfEnvironmentVariable(named = "MYSQL_URL", matches = ".*_test.*")
 class ReviewWorkflowIntegrationTests {
     @Autowired JdbcTemplate jdbcTemplate;
@@ -55,6 +69,13 @@ class ReviewWorkflowIntegrationTests {
     @Autowired RuleSetService ruleSetService;
     @Autowired InvoicePrecheckService precheckService;
     @Autowired PaperService paperService;
+    @Autowired ExportBatchService exportBatchService;
+    @Autowired ExportGenerationWorker exportWorker;
+    @Autowired ExternalStatusService externalStatusService;
+    @Autowired NotificationService notificationService;
+    @Autowired NotificationDeliveryWorker notificationDeliveryWorker;
+    @Autowired HandoverService handoverService;
+    @Autowired AuthorizationService authorizationService;
     @Autowired ObjectMapper objectMapper;
 
     @BeforeEach
@@ -254,6 +275,71 @@ class ReviewWorkflowIntegrationTests {
                     SELECT COUNT(*) FROM invoice_precheck_result
                     WHERE invoice_id=? AND severity='BLOCK' AND result='HIT' AND resolution IS NULL
                     """, Integer.class, duplicateId)).isZero();
+
+            var export = exportBatchService.create(reviewer,
+                    new CreateExportBatchRequest("REVIEW-2026", List.of(invoiceOne, invoiceTwo)));
+            assertThat(export.invoiceCount()).isEqualTo(2);
+            assertThatThrownBy(() -> exportBatchService.create(reviewer,
+                    new CreateExportBatchRequest("DUPLICATE", List.of(invoiceOne))))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode())
+                                    .isEqualTo(BizCode.EXPORT_INVOICE_RESERVED));
+            exportBatchService.generate(export.id(), reviewer, new BatchVersionRequest(0L));
+            assertThat(exportWorker.processNext()).isTrue();
+            ExportBatchVO generated = exportBatchService.detail(export.id());
+            assertThat(generated.status())
+                    .withFailMessage("generation job: %s", generated.generationJob())
+                    .isEqualTo("GENERATED");
+            assertThat(generated.artifacts()).hasSize(4)
+                    .extracting(ExportBatchVO.ArtifactVO::artifactType)
+                    .containsExactlyInAnyOrder("LEDGER_XLSX", "LIST_PDF", "ATTACHMENT_ZIP", "MANIFEST_JSON");
+            ExportBatchVO revised = exportBatchService.revise(export.id(), reviewer,
+                    new BatchVersionRequest(generated.version()));
+            assertThat(revised.revisionNo()).isEqualTo(2);
+            exportBatchService.generate(revised.id(), reviewer, new BatchVersionRequest(0L));
+            assertThat(exportWorker.processNext()).isTrue();
+            ExportBatchVO regenerated = exportBatchService.detail(revised.id());
+            assertThat(regenerated.artifacts()).hasSize(4);
+            exportBatchService.download(revised.id(), regenerated.artifacts().getFirst().id(), reviewer);
+        }
+        String activeBatchId = jdbcTemplate.queryForObject("""
+                SELECT id FROM export_batch WHERE organization_id=? AND batch_no='REVIEW-2026'
+                  AND revision_no=2
+                """, String.class, organization.id());
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), admin)) {
+            var submitted = externalStatusService.append(activeBatchId, admin,
+                    new CreateExternalEventRequest("STATUS_CHANGE", "SUBMITTED_EXTERNAL",
+                            "已提交校外流程", List.of(), 2L));
+            var corrected = externalStatusService.correct(activeBatchId, submitted.id(), admin,
+                    new CorrectExternalEventRequest("RETURNED_EXTERNAL", "对方实际退回",
+                            List.of(), 3L));
+            assertThat(corrected.correctionOfEventId()).isEqualTo(submitted.id());
+            externalStatusService.append(activeBatchId, admin,
+                    new CreateExternalEventRequest("STATUS_CHANGE", "COMPLETED",
+                            "校外流程完成", List.of(), 4L));
+            var archived = exportBatchService.archive(activeBatchId, admin,
+                    new BatchVersionRequest(5L));
+            assertThat(archived.status()).isEqualTo("ARCHIVED");
+
+            long adminVersion = jdbcTemplate.queryForObject("""
+                    SELECT version FROM organization_member WHERE organization_id=? AND cas_id=?
+                    """, Long.class, organization.id(), admin);
+            var handover = handoverService.create(admin,
+                    new CreateHandoverRequest(admin, ordinary, adminVersion, "年度换届"));
+            assertThat(handover.transferredProjectIds()).contains(projectId);
+        }
+        while (notificationDeliveryWorker.processNext()) { }
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM async_job WHERE organization_id=?
+                  AND job_type='NOTIFICATION_DELIVERY' AND status='SUCCEEDED'
+                """, Integer.class, organization.id())).isEqualTo(2);
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), reviewer)) {
+            assertThat(notificationService.inbox(1, 20, "UNREAD").records())
+                    .anySatisfy(notification -> assertThat(notification.notificationType())
+                            .isEqualTo("EXTERNAL_BATCH_RETURNED"));
+        }
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), ordinary)) {
+            assertThat(authorizationService.canManageProject(projectId)).isTrue();
         }
         assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM audit_log WHERE organization_id=?
@@ -284,5 +370,52 @@ class ReviewWorkflowIntegrationTests {
         return new CreateInvoiceRequest("VAT_ELECTRONIC", "3700", invoiceNumber, null,
                 LocalDate.of(2026, 8, 1), "山东大学", null, "测试供应商", null,
                 new BigDecimal(face), new BigDecimal(claimed), fileId, null);
+    }
+
+    @TestConfiguration
+    static class D4TestConfiguration {
+        @Bean
+        @Primary
+        ObjectStorage d4ObjectStorage() {
+            return new ObjectStorage() {
+                private final Map<String, byte[]> objects = new java.util.concurrent.ConcurrentHashMap<>();
+
+                @Override
+                public UploadGrant createUploadGrant(String key, String contentType, long sizeBytes, String sha256) {
+                    return new UploadGrant("https://upload.test/" + key, Map.of(), Instant.now().plusSeconds(60));
+                }
+
+                @Override
+                public Optional<StoredObject> headUpload(String key) { return Optional.empty(); }
+
+                @Override
+                public void finalizeUpload(String key) { }
+
+                @Override
+                public void downloadTo(String key, Path target) {
+                    try {
+                        Files.write(target, objects.getOrDefault(key,
+                                "%PDF-1.4\n% test invoice\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+                    } catch (IOException exception) {
+                        throw new IllegalStateException(exception);
+                    }
+                }
+
+                @Override
+                public void uploadFrom(String key, Path source, String contentType, String sha256) {
+                    try { objects.put(key, Files.readAllBytes(source)); }
+                    catch (IOException exception) { throw new IllegalStateException(exception); }
+                }
+
+                @Override
+                public void delete(String key) { objects.remove(key); }
+
+                @Override
+                public DownloadGrant createDownloadGrant(String key, String originalName, String contentType) {
+                    if (!objects.containsKey(key)) throw new IllegalStateException("missing object");
+                    return new DownloadGrant("https://download.test/" + key, Instant.now().plusSeconds(60));
+                }
+            };
+        }
     }
 }

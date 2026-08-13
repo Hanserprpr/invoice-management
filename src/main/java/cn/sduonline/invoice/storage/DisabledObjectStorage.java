@@ -29,6 +29,11 @@ final class DisabledObjectStorage implements ObjectStorage {
     }
 
     @Override
+    public void uploadFrom(String key, Path source, String contentType, String sha256) {
+        throw unavailable();
+    }
+
+    @Override
     public void delete(String key) {
         throw unavailable();
     }

@@ -7,6 +7,7 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
@@ -135,6 +136,18 @@ final class R2ObjectStorage implements ObjectStorage, AutoCloseable {
                             .bucket(properties.getBucket()).key(key).build(),
                     ResponseTransformer.toOutputStream(output));
         } catch (SdkException | IOException exception) {
+            throw unavailable();
+        }
+    }
+
+    @Override
+    public void uploadFrom(String key, Path source, String contentType, String sha256) {
+        try {
+            client.putObject(PutObjectRequest.builder().bucket(properties.getBucket()).key(key)
+                            .contentType(contentType)
+                            .metadata(Map.of("sha256", sha256.toLowerCase(Locale.ROOT))).build(),
+                    RequestBody.fromFile(source));
+        } catch (SdkException exception) {
             throw unavailable();
         }
     }

@@ -19,6 +19,17 @@ server:
   forward-headers-strategy: framework
 
 app:
+  export:
+    worker-enabled: ${EXPORT_WORKER_ENABLED:${R2_ENABLED:false}}
+    poll-interval: ${EXPORT_POLL_INTERVAL:5s}
+  notification:
+    worker-enabled: ${NOTIFICATION_WORKER_ENABLED:false}
+    poll-interval: ${NOTIFICATION_POLL_INTERVAL:5s}
+    delivery:
+      enabled: ${NOTIFICATION_DELIVERY_ENABLED:false}
+      endpoint: ${NOTIFICATION_DELIVERY_ENDPOINT:}
+      api-key: ${NOTIFICATION_DELIVERY_API_KEY:}
+      timeout: ${NOTIFICATION_DELIVERY_TIMEOUT:10s}
   recognition:
     worker-enabled: ${OCR_WORKER_ENABLED:${R2_ENABLED:false}}
     poll-interval: ${OCR_POLL_INTERVAL:5s}

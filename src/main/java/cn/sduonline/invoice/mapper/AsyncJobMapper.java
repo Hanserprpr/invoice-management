@@ -79,4 +79,14 @@ public interface AsyncJobMapper extends BaseMapper<AsyncJob> {
                                  @Param("jobType") String jobType,
                                  @Param("targetType") String targetType,
                                  @Param("targetId") String targetId);
+
+    @Select("""
+            SELECT * FROM async_job WHERE organization_id=#{organizationId}
+              AND job_type=#{jobType} AND target_type=#{targetType} AND target_id=#{targetId}
+            ORDER BY created_at DESC,id DESC LIMIT 1
+            """)
+    AsyncJob findLatestForTarget(@Param("organizationId") String organizationId,
+                                 @Param("jobType") String jobType,
+                                 @Param("targetType") String targetType,
+                                 @Param("targetId") String targetId);
 }
