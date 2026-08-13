@@ -52,6 +52,20 @@ class ApiSecurityIntegrationTests {
     }
 
     @Test
+    void healthProbeIsAnonymousAndEveryResponseHasSafeRequestId() throws Exception {
+        mockMvc.perform(get("/actuator/health/liveness")
+                        .header("X-Request-Id", "d5-health-check"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .header().string("X-Request-Id", "d5-health-check"));
+
+        mockMvc.perform(get("/auth/me").header("X-Request-Id", "unsafe request id\n"))
+                .andExpect(status().isBadRequest())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .header().exists("X-Request-Id"));
+    }
+
+    @Test
     @Transactional
     void organizationListIsUserScopedAndTenantPathMustMatchHeader() throws Exception {
         jdbcTemplate.update("INSERT INTO `user`(cas_id,name,status,is_platform_admin) VALUES ('api-user','接口用户','ACTIVE',FALSE)");

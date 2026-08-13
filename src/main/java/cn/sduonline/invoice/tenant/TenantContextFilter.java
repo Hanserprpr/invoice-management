@@ -41,6 +41,7 @@ public class TenantContextFilter extends OncePerRequestFilter {
                 || path.startsWith("/auth")
                 || path.startsWith("/oauth2/")
                 || path.startsWith("/login/")
+                || path.startsWith("/actuator/")
                 || path.startsWith("/api/platform/")
                 || path.equals("/api/organizations");
     }

@@ -18,6 +18,11 @@ public class ObjectStorageConfiguration {
         require(properties.getBucket(), "R2_BUCKET");
         requireTtl(properties.getUploadUrlTtl(), "R2_UPLOAD_URL_TTL");
         requireTtl(properties.getDownloadUrlTtl(), "R2_DOWNLOAD_URL_TTL");
+        requireTtl(properties.getRequestTimeout(), "R2_REQUEST_TIMEOUT");
+        requireTtl(properties.getAttemptTimeout(), "R2_ATTEMPT_TIMEOUT");
+        if (properties.getAttemptTimeout().compareTo(properties.getRequestTimeout()) > 0) {
+            throw new IllegalStateException("R2_ATTEMPT_TIMEOUT must not exceed R2_REQUEST_TIMEOUT");
+        }
         return new R2ObjectStorage(properties);
     }
 

@@ -13,6 +13,8 @@ public class R2StorageProperties {
     private String bucket = "";
     private Duration uploadUrlTtl = Duration.ofMinutes(10);
     private Duration downloadUrlTtl = Duration.ofMinutes(5);
+    private Duration requestTimeout = Duration.ofSeconds(30);
+    private Duration attemptTimeout = Duration.ofSeconds(10);
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -28,4 +30,8 @@ public class R2StorageProperties {
     public void setUploadUrlTtl(Duration uploadUrlTtl) { this.uploadUrlTtl = uploadUrlTtl; }
     public Duration getDownloadUrlTtl() { return downloadUrlTtl; }
     public void setDownloadUrlTtl(Duration downloadUrlTtl) { this.downloadUrlTtl = downloadUrlTtl; }
+    public Duration getRequestTimeout() { return requestTimeout; }
+    public void setRequestTimeout(Duration requestTimeout) { this.requestTimeout = requestTimeout; }
+    public Duration getAttemptTimeout() { return attemptTimeout; }
+    public void setAttemptTimeout(Duration attemptTimeout) { this.attemptTimeout = attemptTimeout; }
 }

@@ -8,6 +8,7 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
@@ -51,11 +52,15 @@ final class R2ObjectStorage implements ObjectStorage, AutoCloseable {
                 .pathStyleAccessEnabled(true)
                 .chunkedEncodingEnabled(false)
                 .build();
+        ClientOverrideConfiguration timeouts = ClientOverrideConfiguration.builder()
+                .apiCallTimeout(properties.getRequestTimeout())
+                .apiCallAttemptTimeout(properties.getAttemptTimeout()).build();
         this.client = S3Client.builder()
                 .endpointOverride(endpoint)
                 .credentialsProvider(credentials)
                 .region(Region.of("auto"))
                 .serviceConfiguration(serviceConfiguration)
+                .overrideConfiguration(timeouts)
                 .build();
         this.presigner = S3Presigner.builder()
                 .endpointOverride(endpoint)

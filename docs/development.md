@@ -1,4 +1,4 @@
-# 本地开发与 D0–D4 运行说明
+# 本地开发与 D0–D5 运行说明
 
 ## MySQL
 
@@ -122,6 +122,7 @@ R2 默认关闭，未配置密钥时应用和测试仍可启动，真实上传/�
 - `R2_SECRET_ACCESS_KEY`
 - `R2_BUCKET`
 - 可选 `R2_UPLOAD_URL_TTL`（默认 `10m`）和 `R2_DOWNLOAD_URL_TTL`（默认 `5m`）
+- 可选 `R2_REQUEST_TIMEOUT`（默认 `30s`）和 `R2_ATTEMPT_TIMEOUT`（默认 `10s`）
 
 这些值不得写入配置文件、日志、数据库或 Flyway。R2 桶保持私有；浏览器直传前还需在 R2 配置仅允许前端正式域名、`PUT/GET/HEAD` 和必要请求头的 CORS 规则。
 
@@ -154,3 +155,7 @@ ClamAV TCP 协议本身不提供认证或加密，只能部署在同机或受控
 台账列表与合计查询共用相同的租户、权限和业务筛选条件，合计不受当前页大小影响。普通社员只能查看本人发票；社团审核或审计角色可查看授权范围，项目负责人和具有 `VIEW/REVIEW/MANAGE` 范围的成员只能查看相应项目。时间线访问使用同一权限判定，不会因已知发票 ID 而绕过数据范围。
 
 除社团列表和平台管理入口外，租户 API 必须携带 `X-Organization-Id`。写接口使用 Cookie CSRF Token，并通过 `X-XSRF-TOKEN` 请求头回传。
+
+## D5 生产准备
+
+生产启动使用 `prod` Profile，共享 Session、Redis 限流、健康探针、Prometheus 指标、请求关联 ID 和启动配置校验会同时生效。备份恢复、密钥轮换、真实脱敏样本回放和上线验收见 [production-runbook.md](production-runbook.md)。

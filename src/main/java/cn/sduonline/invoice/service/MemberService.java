@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
@@ -102,7 +103,7 @@ public class MemberService {
         Role memberRole = roleMapper.findByCode("MEMBER");
         memberRoleMapper.insert(OrganizationMemberRole.builder()
                 .memberId(member.getId()).organizationId(organizationId)
-                .roleId(memberRole.getId()).effectiveFrom(Instant.now())
+                .roleId(memberRole.getId()).effectiveFrom(databaseNow())
                 .assignedByCasId(actorCasId).build());
         auditService.append(organizationId, actorCasId, "MEMBER_CREATED",
                 "ORGANIZATION_MEMBER", member.getId(), "{\"casId\":\"" + request.casId() + "\"}");
@@ -172,7 +173,7 @@ public class MemberService {
             if (!ALLOWED_ROLES.contains(assignment.code()) || !duplicateGuard.add(assignment.code())) {
                 throw new BusinessException(BizCode.ROLE_NOT_FOUND, HttpStatus.BAD_REQUEST);
             }
-            Instant from = assignment.effectiveFrom() == null ? Instant.now() : assignment.effectiveFrom();
+            Instant from = assignment.effectiveFrom() == null ? databaseNow() : assignment.effectiveFrom();
             if (assignment.effectiveUntil() != null && assignment.effectiveUntil().isBefore(from)) {
                 throw new BusinessException(BizCode.MEMBER_TERM_INVALID, HttpStatus.BAD_REQUEST);
             }
@@ -221,6 +222,10 @@ public class MemberService {
         if (start != null && end != null && end.isBefore(start)) {
             throw new BusinessException(BizCode.MEMBER_TERM_INVALID, HttpStatus.BAD_REQUEST);
         }
+    }
+
+    private Instant databaseNow() {
+        return Instant.now().truncatedTo(ChronoUnit.MILLIS);
     }
 
     private record RoleBinding(Role role, Instant from, Instant until) {

@@ -3,6 +3,7 @@ package cn.sduonline.invoice;
 import cn.sduonline.invoice.mapper.OrganizationMemberMapper;
 import cn.sduonline.invoice.service.OrganizationService;
 import cn.sduonline.invoice.service.MemberService;
+import cn.sduonline.invoice.service.AsyncJobClaimService;
 import cn.sduonline.invoice.data.dto.OrganizationDtos.CreateOrganizationRequest;
 import cn.sduonline.invoice.data.dto.OrganizationDtos.CreateMemberRequest;
 import cn.sduonline.invoice.data.dto.OrganizationDtos.InitialAdmin;
@@ -19,6 +20,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -34,6 +37,7 @@ class DatabaseMigrationIntegrationTests {
     @Autowired OrganizationMemberMapper memberMapper;
     @Autowired OrganizationService organizationService;
     @Autowired MemberService memberService;
+    @Autowired AsyncJobClaimService asyncJobClaimService;
 
     @BeforeEach
     void requireDedicatedTestDatabase() {
@@ -115,6 +119,34 @@ class DatabaseMigrationIntegrationTests {
                             List.of(new RoleAssignment("REVIEWER", null, null)), List.of()));
             assertThat(replaced.version()).isEqualTo(1);
             assertThat(replaced.roles()).containsExactly("REVIEWER");
+        }
+    }
+
+    @Test
+    void multipleInstancesClaimDifferentAsyncJobs() throws Exception {
+        String organizationId = "01KD5MULTI0000000000000001";
+        jdbcTemplate.update("INSERT INTO `user`(cas_id,name,status,is_platform_admin) VALUES ('d5-worker','D5 Worker','ACTIVE',FALSE)");
+        jdbcTemplate.update("INSERT INTO organization(id,name,type,status) VALUES (?,?,?,?)",
+                organizationId, "D5 multi instance", "CLUB", "ACTIVE");
+        jdbcTemplate.update("""
+                INSERT INTO async_job(id,organization_id,job_type,target_type,target_id,status,
+                  progress,attempt_count,max_attempts,created_by_cas_id)
+                VALUES ('01KD5MULTI0000000000000011',?,'D5_MULTI_INSTANCE','TEST','one','PENDING',0,0,3,'d5-worker'),
+                       ('01KD5MULTI0000000000000012',?,'D5_MULTI_INSTANCE','TEST','two','PENDING',0,0,3,'d5-worker')
+                """, organizationId, organizationId);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> asyncJobClaimService.claim("D5_MULTI_INSTANCE"));
+            var second = executor.submit(() -> asyncJobClaimService.claim("D5_MULTI_INSTANCE"));
+            var firstJob = first.get(10, TimeUnit.SECONDS).orElseThrow();
+            var secondJob = second.get(10, TimeUnit.SECONDS).orElseThrow();
+            assertThat(firstJob.getId()).isNotEqualTo(secondJob.getId());
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM async_job WHERE organization_id=? AND status='RUNNING'
+                    """, Integer.class, organizationId)).isEqualTo(2);
+        } finally {
+            jdbcTemplate.update("DELETE FROM async_job WHERE organization_id=?", organizationId);
+            jdbcTemplate.update("DELETE FROM organization WHERE id=?", organizationId);
+            jdbcTemplate.update("DELETE FROM `user` WHERE cas_id='d5-worker'");
         }
     }
 }

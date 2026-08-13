@@ -4,6 +4,7 @@ import cn.sduonline.invoice.security.SduOidcUserService;
 import cn.sduonline.invoice.security.SecurityErrorWriter;
 import cn.sduonline.invoice.data.enums.BizCode;
 import cn.sduonline.invoice.tenant.TenantContextFilter;
+import cn.sduonline.invoice.security.RedisRateLimitFilter;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -18,6 +19,9 @@ import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 
 /**
  * 山东大学 OIDC 登录和接口访问控制。
@@ -66,6 +70,7 @@ public class SecurityConfig {
             SduOidcUserService sduOidcUserService,
             SecurityErrorWriter securityErrorWriter,
             TenantContextFilter tenantContextFilter,
+            ObjectProvider<RedisRateLimitFilter> rateLimitFilter,
             @Value("${app.security.oidc.success-url}") String successUrl
     ) throws Exception {
         http
@@ -75,7 +80,9 @@ public class SecurityConfig {
                                 "/auth/logout/success",
                                 "/oauth2/**",
                                 "/login/**",
-                                "/error"
+                                "/error",
+                                "/actuator/health/liveness",
+                                "/actuator/health/readiness"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
@@ -97,6 +104,8 @@ public class SecurityConfig {
                 .logout(logout -> logout
                         .logoutSuccessUrl("/auth/logout/success")
                 );
+        rateLimitFilter.ifAvailable(filter -> http.addFilterBefore(filter,
+                OAuth2AuthorizationRequestRedirectFilter.class));
         return http.build();
     }
 
@@ -104,6 +113,16 @@ public class SecurityConfig {
     public FilterRegistrationBean<TenantContextFilter> disableTenantFilterAutoRegistration(
             TenantContextFilter filter) {
         FilterRegistrationBean<TenantContextFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    @ConditionalOnBean(RedisRateLimitFilter.class)
+    public FilterRegistrationBean<RedisRateLimitFilter> disableRateLimitFilterAutoRegistration(
+            ObjectProvider<RedisRateLimitFilter> filter) {
+        FilterRegistrationBean<RedisRateLimitFilter> registration = new FilterRegistrationBean<>();
+        filter.ifAvailable(registration::setFilter);
         registration.setEnabled(false);
         return registration;
     }

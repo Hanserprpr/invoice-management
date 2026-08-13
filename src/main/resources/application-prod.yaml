@@ -1,0 +1,35 @@
+spring:
+  session:
+    store-type: redis
+    redis:
+      namespace: invoice-management:session
+      flush-mode: on_save
+  datasource:
+    hikari:
+      connection-timeout: ${MYSQL_CONNECTION_TIMEOUT:10000}
+      validation-timeout: ${MYSQL_VALIDATION_TIMEOUT:3000}
+      maximum-pool-size: ${MYSQL_POOL_MAX_SIZE:20}
+      minimum-idle: ${MYSQL_POOL_MIN_IDLE:5}
+
+server:
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        secure: true
+        same-site: lax
+  tomcat:
+    accesslog:
+      enabled: true
+      pattern: '%a %t "%r" %s %D %{X-Request-Id}o'
+
+app:
+  rate-limit:
+    enabled: true
+
+management:
+  endpoint:
+    health:
+      group:
+        readiness:
+          include: readinessState,db,redis,asyncJobs

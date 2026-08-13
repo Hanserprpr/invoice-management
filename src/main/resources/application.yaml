@@ -1,6 +1,8 @@
 spring:
   application:
     name: invoice-management
+  session:
+    store-type: none
   datasource:
     url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/invoice_management?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC}
     username: ${MYSQL_USERNAME:root}
@@ -17,8 +19,31 @@ mybatis-plus:
 
 server:
   forward-headers-strategy: framework
+  tomcat:
+    connection-timeout: ${SERVER_CONNECTION_TIMEOUT:10s}
+  servlet:
+    session:
+      timeout: ${SESSION_TIMEOUT:30m}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  metrics:
+    tags:
+      application: ${spring.application.name}
 
 app:
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:false}
+    requests: ${RATE_LIMIT_REQUESTS:60}
+    window: ${RATE_LIMIT_WINDOW:1m}
   export:
     worker-enabled: ${EXPORT_WORKER_ENABLED:${R2_ENABLED:false}}
     poll-interval: ${EXPORT_POLL_INTERVAL:5s}
@@ -59,6 +84,8 @@ app:
       bucket: ${R2_BUCKET:}
       upload-url-ttl: ${R2_UPLOAD_URL_TTL:10m}
       download-url-ttl: ${R2_DOWNLOAD_URL_TTL:5m}
+      request-timeout: ${R2_REQUEST_TIMEOUT:30s}
+      attempt-timeout: ${R2_ATTEMPT_TIMEOUT:10s}
   bootstrap:
     platform-admin:
       cas-id: ${APP_BOOTSTRAP_PLATFORM_ADMIN_CAS_ID:}
