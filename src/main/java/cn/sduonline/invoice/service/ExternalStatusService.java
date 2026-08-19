@@ -12,7 +12,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -22,7 +21,7 @@ public class ExternalStatusService {
     private final ExternalStatusEventMapper eventMapper;
     private final ExternalStatusEventAttachmentMapper attachmentMapper;
     private final ExportBatchMapper batchMapper;
-    private final InvoiceExportReservationMapper reservationMapper;
+    private final ExportLifecycleService lifecycle;
     private final AuthorizationService authorizationService;
     private final FileObjectService fileService;
     private final NotificationService notificationService;
@@ -31,7 +30,7 @@ public class ExternalStatusService {
     public ExternalStatusService(ExternalStatusEventMapper eventMapper,
                                  ExternalStatusEventAttachmentMapper attachmentMapper,
                                  ExportBatchMapper batchMapper,
-                                 InvoiceExportReservationMapper reservationMapper,
+                                 ExportLifecycleService lifecycle,
                                  AuthorizationService authorizationService,
                                  FileObjectService fileService,
                                  NotificationService notificationService,
@@ -39,7 +38,7 @@ public class ExternalStatusService {
         this.eventMapper = eventMapper;
         this.attachmentMapper = attachmentMapper;
         this.batchMapper = batchMapper;
-        this.reservationMapper = reservationMapper;
+        this.lifecycle = lifecycle;
         this.authorizationService = authorizationService;
         this.fileService = fileService;
         this.notificationService = notificationService;
@@ -59,6 +58,9 @@ public class ExternalStatusService {
         ExportBatch batch = prepare(batchId, request.batchVersion());
         if ("COMMENT".equals(request.eventType())
                 && (request.comment() == null || request.comment().isBlank())) invalid();
+        if ("COMMENT".equals(request.eventType())
+                && !Set.of("GENERATED", "EXPORTED", "EXTERNAL_PROCESSING", "COMPLETED")
+                .contains(batch.getStatus())) state();
         return persist(batch, actorCasId, request.eventType(), request.status(), null,
                 clean(request.comment()), request.attachmentFileIds());
     }
@@ -71,7 +73,7 @@ public class ExternalStatusService {
         if (corrected == null) {
             throw new BusinessException(BizCode.EXTERNAL_STATUS_NOT_FOUND, HttpStatus.NOT_FOUND);
         }
-        if ("CORRECTION".equals(corrected.getEventType())) {
+        if (!"STATUS_CHANGE".equals(corrected.getEventType())) {
             throw new BusinessException(BizCode.EXTERNAL_STATUS_CORRECTION_INVALID, HttpStatus.CONFLICT);
         }
         return persist(batch, actorCasId, "CORRECTION", request.status(), eventId,
@@ -82,8 +84,6 @@ public class ExternalStatusService {
         ExportBatch batch = requireBatch(batchId);
         authorizationService.requireProjectManage(batch.getProjectId());
         if (batch.getVersion() == null || batch.getVersion() != version) conflict();
-        if (!Set.of("GENERATED", "EXPORTED", "EXTERNAL_PROCESSING", "COMPLETED")
-                .contains(batch.getStatus())) state();
         return batch;
     }
 
@@ -106,8 +106,8 @@ public class ExternalStatusService {
                     .organizationId(batch.getOrganizationId()).fileId(fileId).build());
             fileService.markReferenced(fileId);
         }
-        applyBatchState(batch, status);
-        if ("RETURNED_EXTERNAL".equals(status)) {
+        if (!"COMMENT".equals(eventType)) applyBatchState(batch, status);
+        if (!"COMMENT".equals(eventType) && "RETURNED_EXTERNAL".equals(status)) {
             notificationService.createDeduplicated(batch.getOrganizationId(),
                     batch.getCreatedByCasId(), "EXTERNAL_BATCH_RETURNED", "导出批次被退回",
                     "批次 " + batch.getBatchNo() + " 已在平台外退回，请及时处理。",
@@ -121,24 +121,16 @@ public class ExternalStatusService {
     }
 
     private void applyBatchState(ExportBatch batch, String externalStatus) {
-        String next = switch (externalStatus) {
-            case "SUBMITTED_EXTERNAL", "RETURNED_EXTERNAL" -> "EXTERNAL_PROCESSING";
-            case "COMPLETED" -> "COMPLETED";
-            case "CANCELLED" -> "CANCELLED";
-            case "ARCHIVED" -> "ARCHIVED";
-            default -> batch.getStatus();
+        ExportLifecycleService.Action action = switch (externalStatus) {
+            case "PENDING_EXTERNAL" -> ExportLifecycleService.Action.PENDING_EXTERNAL;
+            case "SUBMITTED_EXTERNAL", "RETURNED_EXTERNAL" ->
+                    ExportLifecycleService.Action.EXTERNAL_PROCESSING;
+            case "COMPLETED" -> ExportLifecycleService.Action.COMPLETE;
+            case "CANCELLED" -> ExportLifecycleService.Action.CANCEL;
+            case "ARCHIVED" -> ExportLifecycleService.Action.FINAL_ARCHIVE;
+            default -> throw new BusinessException(BizCode.PARAM_INVALID, HttpStatus.BAD_REQUEST);
         };
-        batch.setStatus(next);
-        if ("COMPLETED".equals(next)) batch.setCompletedAt(Instant.now());
-        if ("CANCELLED".equals(next)) batch.setCancelledAt(Instant.now());
-        if ("ARCHIVED".equals(next)) batch.setArchivedAt(Instant.now());
-        long version = batch.getVersion();
-        batch.setVersion(version);
-        if (batchMapper.updateById(batch) != 1) conflict();
-        batch.setVersion(version + 1);
-        if ("CANCELLED".equals(next)) {
-            reservationMapper.deleteForBatch(batch.getOrganizationId(), batch.getId());
-        }
+        lifecycle.transition(batch, batch.getVersion(), action);
     }
 
     private ExportBatch requireBatch(String id) {

@@ -36,6 +36,7 @@ import java.util.Optional;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicBoolean;
 import cn.sduonline.invoice.storage.ObjectStorage;
 import cn.sduonline.invoice.recognition.InvoiceRecognitionAdapter;
 
@@ -60,6 +61,7 @@ class InvoiceWorkflowIntegrationTests {
     @Autowired ObjectMapper objectMapper;
     @Autowired RecognitionService recognitionService;
     @Autowired RecognitionWorker recognitionWorker;
+    @Autowired TestRecognitionAdapter recognitionAdapter;
 
     @BeforeEach
     void requireDedicatedTestDatabase() {
@@ -127,56 +129,150 @@ class InvoiceWorkflowIntegrationTests {
                             exception -> assertThat(exception.getBizCode()).isEqualTo(BizCode.FILE_ALREADY_USED));
             var recognitionJob = recognitionService.start(invoiceId, member);
             recognitionJobId = recognitionJob.id();
+            assertThat(invoiceService.detail(invoiceId).status()).isEqualTo("PENDING_RECOGNITION");
             assertThat(recognitionService.start(invoiceId, member).id()).isEqualTo(recognitionJob.id());
         }
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), admin)) {
+            assertThatThrownBy(() -> recognitionService.start(invoiceId, admin))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode()).isEqualTo(BizCode.INVOICE_NOT_FOUND));
+        }
+        recognitionAdapter.failNext();
+        assertThat(recognitionWorker.processNext()).isTrue();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT CONCAT(status,':',COALESCE(error_code,''),':',COALESCE(error_message,'')) FROM async_job WHERE id=?",
+                String.class, recognitionJobId)).startsWith("PENDING:IllegalStateException:");
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), member)) {
+            assertThat(invoiceService.detail(invoiceId).status()).isEqualTo("DRAFT");
+        }
+        jdbcTemplate.update("UPDATE async_job SET next_attempt_at=DATE_SUB(NOW(),INTERVAL 1 SECOND) WHERE id=?",
+                recognitionJobId);
         assertThat(recognitionWorker.processNext()).isTrue();
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT CONCAT(status,':',COALESCE(error_code,''),':',COALESCE(error_message,'')) FROM async_job WHERE id=?",
                 String.class, recognitionJobId)).isEqualTo("SUCCEEDED::");
         try (TenantContext.Scope ignored = TenantContext.open(organization.id(), member)) {
-            var suggestions = recognitionService.suggestions(invoiceId);
+            assertThat(invoiceService.detail(invoiceId).status()).isEqualTo("PENDING_RECOGNITION");
+            var firstSuggestions = recognitionService.suggestions(invoiceId).stream()
+                    .filter(item -> item.status().equals("PENDING")).toList();
+            assertThat(firstSuggestions).extracting("fieldPath")
+                    .containsExactlyInAnyOrder("sellerName", "faceAmount");
+            recognitionService.confirm(invoiceId, member, new ConfirmSuggestionsRequest(
+                    firstSuggestions.stream().map(item ->
+                            new SuggestionDecision(item.id(), "ACCEPTED", null)).toList()));
+
+            var secondJob = recognitionService.start(invoiceId, member);
+            assertThat(secondJob.id()).isNotEqualTo(recognitionJobId);
+            var pending = invoiceService.detail(invoiceId);
+            assertThat(pending.status()).isEqualTo("PENDING_RECOGNITION");
+            var edited = invoiceService.update(invoiceId, member,
+                    invoiceUpdate(pending.version(), "手工供应商"));
+            assertThat(edited.status()).isEqualTo("PENDING_RECOGNITION");
+        }
+        assertThat(recognitionWorker.processNext()).isTrue();
+        String secondJobId = jdbcTemplate.queryForObject("""
+                SELECT id FROM async_job WHERE organization_id=? AND target_id=?
+                ORDER BY created_at DESC,id DESC LIMIT 1
+                """, String.class, organization.id(), invoiceId);
+        assertThat(secondJobId).isNotEqualTo(recognitionJobId);
+        String sellerSuggestionId;
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), member)) {
+            var suggestions = recognitionService.suggestions(invoiceId).stream()
+                    .filter(item -> item.status().equals("PENDING")).toList();
             assertThat(suggestions).extracting("fieldPath")
                     .containsExactlyInAnyOrder("sellerName", "faceAmount");
-            var sellerSuggestion = suggestions.stream()
-                    .filter(item -> item.fieldPath().equals("sellerName")).findFirst().orElseThrow();
+            sellerSuggestionId = suggestions.stream()
+                    .filter(item -> item.fieldPath().equals("sellerName")).findFirst().orElseThrow().id();
+        }
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), admin)) {
+            String deniedSuggestionId = sellerSuggestionId;
+            assertThatThrownBy(() -> recognitionService.confirm(invoiceId, admin,
+                    new ConfirmSuggestionsRequest(List.of(
+                            new SuggestionDecision(deniedSuggestionId, "ACCEPTED", null)))))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode()).isEqualTo(BizCode.INVOICE_NOT_FOUND));
+        }
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), member)) {
             recognitionService.confirm(invoiceId, member, new ConfirmSuggestionsRequest(List.of(
-                    new SuggestionDecision(sellerSuggestion.id(), "CORRECTED", "修正供应商"))));
+                    new SuggestionDecision(sellerSuggestionId, "CORRECTED", "修正供应商"))));
+            assertThat(invoiceService.detail(invoiceId).status()).isEqualTo("PENDING_RECOGNITION");
             assertThat(recognitionService.suggestions(invoiceId).stream()
-                    .filter(item -> item.id().equals(sellerSuggestion.id())).findFirst().orElseThrow()
+                    .filter(item -> item.id().equals(sellerSuggestionId)).findFirst().orElseThrow()
                     .finalValue()).isEqualTo("修正供应商");
+            var remaining = recognitionService.suggestions(invoiceId).stream()
+                    .filter(item -> item.status().equals("PENDING")).toList();
+            recognitionService.confirm(invoiceId, member, new ConfirmSuggestionsRequest(
+                    remaining.stream().map(item ->
+                            new SuggestionDecision(item.id(), "ACCEPTED", null)).toList()));
+            assertThat(invoiceService.detail(invoiceId).status()).isEqualTo("DRAFT");
             register(member, "payment.png", "image/png", "b", "PAYMENT_RECORD");
             register(member, "replacement.ofd", "application/ofd", "c", "INVOICE_ORIGINAL");
+            register(member, "pending-submit.pdf", "application/pdf", "d", "INVOICE_ORIGINAL");
         }
 
         var payment = fileService.inspect(platform, organization.id(), fileIdByHash(organization.id(), "b"),
                 new InspectFileRequest("READY", null));
         var replacement = fileService.inspect(platform, organization.id(), fileIdByHash(organization.id(), "c"),
                 new InspectFileRequest("READY", null));
+        var pendingSubmitFile = fileService.inspect(platform, organization.id(), fileIdByHash(organization.id(), "d"),
+                new InspectFileRequest("READY", null));
+        String pendingSubmitInvoiceId;
+        String pendingSubmitJobId;
         try (TenantContext.Scope ignored = TenantContext.open(organization.id(), member)) {
+            long currentVersion = invoiceService.detail(invoiceId).version();
             var attachment = invoiceService.addAttachment(invoiceId, member,
-                    new AddAttachmentRequest(0L, "PAYMENT_RECORD", payment.id(), "付款截图"));
+                    new AddAttachmentRequest(currentVersion, "PAYMENT_RECORD", payment.id(), "付款截图"));
             assertThat(attachment.status()).isEqualTo("ACTIVE");
+            currentVersion = invoiceService.detail(invoiceId).version();
             var replaced = invoiceService.replaceFile(invoiceId, member,
-                    new ReplaceFileRequest(1L, replacement.id(), "原文件上传错误"));
-            assertThat(replaced.version()).isEqualTo(2);
+                    new ReplaceFileRequest(currentVersion, replacement.id(), "原文件上传错误"));
             assertThat(replaced.fileRevisions()).extracting("revisionNo").containsExactly(1, 2);
+
+            var pendingSubmitInvoice = invoiceService.create(applicationId, member,
+                    invoiceRequest(pendingSubmitFile.id(), "50.00", "40.00"));
+            pendingSubmitInvoiceId = pendingSubmitInvoice.id();
+            pendingSubmitJobId = recognitionService.start(pendingSubmitInvoiceId, member).id();
+            assertThat(invoiceService.detail(pendingSubmitInvoiceId).status())
+                    .isEqualTo("PENDING_RECOGNITION");
 
             var saved = applicationService.saveDraft(applicationId, member,
                     new SaveDraftRequest(objectMapper.readTree(
-                            "{\"invoices\":[\"" + invoiceId + "\"]}"), 0L));
+                            "{\"invoices\":[\"" + invoiceId + "\",\""
+                                    + pendingSubmitInvoiceId + "\"]}"), 0L));
             var submitted = applicationService.submit(applicationId, member,
                     new SubmitRequest(saved.version()));
             assertThat(submitted.status()).isEqualTo("SUBMITTED");
             var submittedInvoice = invoiceService.detail(invoiceId);
             assertThat(submittedInvoice.status()).isEqualTo("SUBMITTED");
+            assertThat(invoiceService.detail(pendingSubmitInvoiceId).status()).isEqualTo("SUBMITTED");
+            assertThatThrownBy(() -> recognitionService.start(invoiceId, member))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode())
+                                    .isEqualTo(BizCode.INVOICE_STATE_NOT_ALLOWED));
             assertThatThrownBy(() -> invoiceService.deleteDraft(invoiceId, member,
                     submittedInvoice.version()))
                     .isInstanceOfSatisfying(BusinessException.class,
                             exception -> assertThat(exception.getBizCode())
                                     .isEqualTo(BizCode.INVOICE_STATE_NOT_ALLOWED));
+        }
+        assertThat(recognitionWorker.processNext()).isTrue();
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT JSON_UNQUOTE(JSON_EXTRACT(result_json,'$.outcome'))
+                FROM async_job WHERE id=?
+                """, String.class, pendingSubmitJobId)).isEqualTo("DISCARDED_SUBMITTED");
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), member)) {
+            assertThat(recognitionService.suggestions(pendingSubmitInvoiceId)).isEmpty();
+            jdbcTemplate.update("UPDATE invoice SET status='RETURNED' WHERE id=?", invoiceId);
+            jdbcTemplate.update("UPDATE application SET status='RETURNED' WHERE id=?", applicationId);
+            recognitionService.start(invoiceId, member);
+            assertThat(invoiceService.detail(invoiceId).status()).isEqualTo("RETURNED");
+
             var voided = invoiceService.voidFormal(invoiceId, member,
-                    new VersionedReasonRequest(submittedInvoice.version(), "发票已冲红"));
+                    new VersionedReasonRequest(invoiceService.detail(invoiceId).version(), "发票已冲红"));
             assertThat(voided.status()).isEqualTo("VOIDED");
+            invoiceService.voidFormal(pendingSubmitInvoiceId, member,
+                    new VersionedReasonRequest(invoiceService.detail(pendingSubmitInvoiceId).version(),
+                            "发票已冲红"));
             assertThat(applicationService.detail(applicationId).status()).isEqualTo("REJECTED");
         }
         try (TenantContext.Scope ignored = TenantContext.open(organization.id(), other)) {
@@ -188,7 +284,7 @@ class InvoiceWorkflowIntegrationTests {
                 SELECT COUNT(*) FROM audit_log WHERE organization_id=?
                   AND action IN ('FILE_INSPECTION_RECORDED','INVOICE_DRAFT_CREATED',
                     'INVOICE_FILE_REPLACED','INVOICE_ATTACHMENT_ADDED','INVOICE_VOIDED')
-                """, Integer.class, organization.id())).isEqualTo(7);
+                """, Integer.class, organization.id())).isEqualTo(10);
     }
 
     private cn.sduonline.invoice.data.vo.FileObjectVO register(
@@ -206,6 +302,11 @@ class InvoiceWorkflowIntegrationTests {
         return new CreateInvoiceRequest("VAT_ELECTRONIC", "3700", "10001", null,
                 LocalDate.of(2026, 8, 1), "山东大学", null, "测试供应商", null,
                 new BigDecimal(face), new BigDecimal(claimed), fileId, null);
+    }
+
+    private UpdateInvoiceRequest invoiceUpdate(long version, String sellerName) {
+        return new UpdateInvoiceRequest(version, null, null, null, null,
+                null, null, null, sellerName, null, null, null, null, Set.of());
     }
 
     @TestConfiguration(proxyBeanMethods = false)
@@ -238,15 +339,28 @@ class InvoiceWorkflowIntegrationTests {
 
         @Bean
         @Primary
-        InvoiceRecognitionAdapter recognitionAdapter() {
-            return (file, contentType) -> new InvoiceRecognitionAdapter.RecognitionResult(
-                    "山东大学 测试供应商 100.00", "qr-original",
+        TestRecognitionAdapter recognitionAdapter() {
+            return new TestRecognitionAdapter();
+        }
+    }
+
+    static class TestRecognitionAdapter implements InvoiceRecognitionAdapter {
+        private final AtomicBoolean failNext = new AtomicBoolean();
+
+        void failNext() {
+            failNext.set(true);
+        }
+
+        @Override
+        public RecognitionResult recognize(Path file, String contentType) {
+            if (failNext.getAndSet(false)) throw new IllegalStateException("test recognition failure");
+            return new RecognitionResult("山东大学 测试供应商 100.00", "qr-original",
                     Map.of(
-                            "sellerName", new InvoiceRecognitionAdapter.SuggestedField(
+                            "sellerName", new SuggestedField(
                                     "测试供应商", new BigDecimal("0.9800")),
-                            "faceAmount", new InvoiceRecognitionAdapter.SuggestedField(
+                            "faceAmount", new SuggestedField(
                                     "100.00", new BigDecimal("0.9900")),
-                            "ignoredField", new InvoiceRecognitionAdapter.SuggestedField(
+                            "ignoredField", new SuggestedField(
                                     "ignored", BigDecimal.ONE)), true);
         }
     }

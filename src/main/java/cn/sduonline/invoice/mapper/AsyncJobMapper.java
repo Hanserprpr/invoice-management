@@ -83,6 +83,20 @@ public interface AsyncJobMapper extends BaseMapper<AsyncJob> {
     @Select("""
             SELECT * FROM async_job WHERE organization_id=#{organizationId}
               AND job_type=#{jobType} AND target_type=#{targetType} AND target_id=#{targetId}
+              AND active_slot=1 LIMIT 1 FOR UPDATE
+            """)
+    AsyncJob findActiveForTargetForUpdate(@Param("organizationId") String organizationId,
+                                          @Param("jobType") String jobType,
+                                          @Param("targetType") String targetType,
+                                          @Param("targetId") String targetId);
+
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("SELECT * FROM async_job WHERE id=#{id} FOR UPDATE")
+    AsyncJob lockById(@Param("id") String id);
+
+    @Select("""
+            SELECT * FROM async_job WHERE organization_id=#{organizationId}
+              AND job_type=#{jobType} AND target_type=#{targetType} AND target_id=#{targetId}
             ORDER BY created_at DESC,id DESC LIMIT 1
             """)
     AsyncJob findLatestForTarget(@Param("organizationId") String organizationId,

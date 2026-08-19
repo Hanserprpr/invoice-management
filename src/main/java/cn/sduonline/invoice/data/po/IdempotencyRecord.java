@@ -22,6 +22,7 @@ public class IdempotencyRecord {
     @TableId(value = "id", type = IdType.INPUT)
     private String id;
     private String organizationId;
+    private String scope;
     private String casId;
     private String idempotencyKey;
     private String requestMethod;

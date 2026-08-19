@@ -40,7 +40,7 @@ public class RecognitionWorker {
     public boolean processNext() {
         for (AsyncJob stale : claimService.findStale(JOB_TYPE,
                 Instant.now().minusSeconds(300), 100)) {
-            claimService.retryOrFail(stale, "WORKER_LEASE_EXPIRED", "识别节点超时，已重新调度");
+            resultService.recordFailure(stale, "WORKER_LEASE_EXPIRED", "识别节点超时，已重新调度");
         }
         var claimed = claimService.claim(JOB_TYPE);
         if (claimed.isEmpty()) return false;
@@ -49,7 +49,7 @@ public class RecognitionWorker {
                 job.getOrganizationId(), job.getCreatedByCasId())) {
             process(job);
         } catch (Exception exception) {
-            claimService.retryOrFail(job, errorCode(exception), safeMessage(exception));
+            resultService.recordFailure(job, errorCode(exception), safeMessage(exception));
         }
         return true;
     }

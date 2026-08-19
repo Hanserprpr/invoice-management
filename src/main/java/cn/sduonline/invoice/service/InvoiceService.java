@@ -24,7 +24,7 @@ import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class InvoiceService {
-    private static final Set<String> EDITABLE = Set.of("DRAFT", "RETURNED");
+    private static final Set<String> EDITABLE = Set.of("DRAFT", "RETURNED", "PENDING_RECOGNITION");
     private static final Set<String> ORIGINAL_PURPOSES = Set.of("INVOICE_ORIGINAL");
 
     private final InvoiceMapper invoiceMapper;

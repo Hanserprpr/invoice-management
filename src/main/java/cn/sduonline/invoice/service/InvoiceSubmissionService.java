@@ -35,7 +35,8 @@ public class InvoiceSubmissionService {
         Set<String> actualIds = new HashSet<>();
         for (Invoice invoice : activeInvoices) {
             actualIds.add(invoice.getId());
-            if (!Set.of("DRAFT", "RETURNED", "SUBMITTED", "INTERNALLY_APPROVED", "REJECTED")
+            if (!Set.of("DRAFT", "RETURNED", "PENDING_RECOGNITION",
+                    "SUBMITTED", "INTERNALLY_APPROVED", "REJECTED")
                     .contains(invoice.getStatus())) {
                 throw new BusinessException(BizCode.INVOICE_STATE_NOT_ALLOWED, HttpStatus.CONFLICT);
             }
@@ -68,7 +69,8 @@ public class InvoiceSubmissionService {
                     "表单中的发票引用必须与当前申请发票一致");
         }
         for (Invoice invoice : activeInvoices) {
-            if (!Set.of("DRAFT", "RETURNED").contains(invoice.getStatus())) continue;
+            if (!Set.of("DRAFT", "RETURNED", "PENDING_RECOGNITION")
+                    .contains(invoice.getStatus())) continue;
             long version = invoice.getVersion() == null ? 0 : invoice.getVersion();
             invoice.setStatus("SUBMITTED");
             invoice.setVersion(version);
@@ -77,7 +79,8 @@ public class InvoiceSubmissionService {
             }
         }
         boolean hasSubmitted = activeInvoices.stream().anyMatch(invoice ->
-                Set.of("DRAFT", "RETURNED", "SUBMITTED").contains(invoice.getStatus()));
+                Set.of("DRAFT", "RETURNED", "PENDING_RECOGNITION", "SUBMITTED")
+                        .contains(invoice.getStatus()));
         boolean hasConcluded = activeInvoices.stream().anyMatch(invoice ->
                 Set.of("INTERNALLY_APPROVED", "REJECTED").contains(invoice.getStatus()));
         return hasSubmitted && hasConcluded ? "PROCESSING" : "SUBMITTED";
