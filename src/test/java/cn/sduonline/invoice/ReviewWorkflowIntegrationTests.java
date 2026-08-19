@@ -275,10 +275,27 @@ class ReviewWorkflowIntegrationTests {
                     SELECT COUNT(*) FROM invoice_precheck_result
                     WHERE invoice_id=? AND severity='BLOCK' AND result='HIT' AND resolution IS NULL
                     """, Integer.class, duplicateId)).isZero();
+            jdbcTemplate.update("DELETE FROM invoice_precheck_result WHERE invoice_id=?", duplicateId);
+            jdbcTemplate.update("DELETE FROM invoice WHERE id=?", duplicateId);
+
+            var cancellable = exportBatchService.create(reviewer,
+                    new CreateExportBatchRequest("REVIEW-CANCELLED", List.of(invoiceOne, invoiceTwo)));
+            assertThat(invoiceStatus(invoiceOne)).isEqualTo("IN_EXPORT_BATCH");
+            assertThat(invoiceStatus(invoiceTwo)).isEqualTo("IN_EXPORT_BATCH");
+            assertThat(reservationBatch(invoiceOne)).isEqualTo(cancellable.id());
+            assertThat(reservationBatch(invoiceTwo)).isEqualTo(cancellable.id());
+            exportBatchService.cancel(cancellable.id(), reviewer,
+                    new BatchVersionRequest(cancellable.version()));
+            assertThat(invoiceStatus(invoiceOne)).isEqualTo("INTERNALLY_APPROVED");
+            assertThat(invoiceStatus(invoiceTwo)).isEqualTo("INTERNALLY_APPROVED");
+            assertThat(reservationBatch(invoiceOne)).isNull();
+            assertThat(reservationBatch(invoiceTwo)).isNull();
 
             var export = exportBatchService.create(reviewer,
                     new CreateExportBatchRequest("REVIEW-2026", List.of(invoiceOne, invoiceTwo)));
             assertThat(export.invoiceCount()).isEqualTo(2);
+            assertThat(invoiceStatus(invoiceOne)).isEqualTo("IN_EXPORT_BATCH");
+            assertThat(invoiceStatus(invoiceTwo)).isEqualTo("IN_EXPORT_BATCH");
             assertThatThrownBy(() -> exportBatchService.create(reviewer,
                     new CreateExportBatchRequest("DUPLICATE", List.of(invoiceOne))))
                     .isInstanceOfSatisfying(BusinessException.class,
@@ -296,6 +313,10 @@ class ReviewWorkflowIntegrationTests {
             ExportBatchVO revised = exportBatchService.revise(export.id(), reviewer,
                     new BatchVersionRequest(generated.version()));
             assertThat(revised.revisionNo()).isEqualTo(2);
+            assertThat(invoiceStatus(invoiceOne)).isEqualTo("IN_EXPORT_BATCH");
+            assertThat(invoiceStatus(invoiceTwo)).isEqualTo("IN_EXPORT_BATCH");
+            assertThat(reservationBatch(invoiceOne)).isEqualTo(revised.id());
+            assertThat(reservationBatch(invoiceTwo)).isEqualTo(revised.id());
             exportBatchService.generate(revised.id(), reviewer, new BatchVersionRequest(0L));
             assertThat(exportWorker.processNext()).isTrue();
             ExportBatchVO regenerated = exportBatchService.detail(revised.id());
@@ -307,19 +328,75 @@ class ReviewWorkflowIntegrationTests {
                   AND revision_no=2
                 """, String.class, organization.id());
         try (TenantContext.Scope ignored = TenantContext.open(organization.id(), admin)) {
-            var submitted = externalStatusService.append(activeBatchId, admin,
+            var comment = externalStatusService.append(activeBatchId, admin,
+                    new CreateExternalEventRequest("COMMENT", "RETURNED_EXTERNAL",
+                            "仅追加备注，不改变批次状态", List.of(), 2L));
+            assertThat(comment.status()).isEqualTo("RETURNED_EXTERNAL");
+            assertThat(exportBatchService.detail(activeBatchId).status()).isEqualTo("EXPORTED");
+            assertThat(exportBatchService.detail(activeBatchId).version()).isEqualTo(2L);
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM notification
+                    WHERE notification_type='EXTERNAL_BATCH_RETURNED' AND target_id=?
+                    """, Integer.class, activeBatchId)).isZero();
+            assertThatThrownBy(() -> externalStatusService.correct(activeBatchId, comment.id(), admin,
+                    new CorrectExternalEventRequest("SUBMITTED_EXTERNAL", "备注不能更正为状态",
+                            List.of(), 2L)))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode())
+                                    .isEqualTo(BizCode.EXTERNAL_STATUS_CORRECTION_INVALID));
+            assertThat(exportBatchService.detail(activeBatchId).status()).isEqualTo("EXPORTED");
+            assertThat(exportBatchService.detail(activeBatchId).version()).isEqualTo(2L);
+            assertThatThrownBy(() -> externalStatusService.append(activeBatchId, admin,
+                    new CreateExternalEventRequest("STATUS_CHANGE", "ARCHIVED",
+                            "不能跳过完成直接归档", List.of(), 2L)))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode())
+                                    .isEqualTo(BizCode.EXPORT_BATCH_STATE_NOT_ALLOWED));
+
+            externalStatusService.append(activeBatchId, admin,
                     new CreateExternalEventRequest("STATUS_CHANGE", "SUBMITTED_EXTERNAL",
                             "已提交校外流程", List.of(), 2L));
-            var corrected = externalStatusService.correct(activeBatchId, submitted.id(), admin,
+            externalStatusService.append(activeBatchId, admin,
+                    new CreateExternalEventRequest("STATUS_CHANGE", "CANCELLED",
+                            "校外流程取消", List.of(), 3L));
+            assertThat(exportBatchService.detail(activeBatchId).status()).isEqualTo("CANCELLED");
+            assertThat(invoiceStatus(invoiceOne)).isEqualTo("INTERNALLY_APPROVED");
+            assertThat(invoiceStatus(invoiceTwo)).isEqualTo("INTERNALLY_APPROVED");
+            assertThat(reservationBatch(invoiceOne)).isNull();
+            assertThat(reservationBatch(invoiceTwo)).isNull();
+        }
+
+        String finalBatchId;
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), reviewer)) {
+            var finalBatch = exportBatchService.create(reviewer,
+                    new CreateExportBatchRequest("REVIEW-FINAL", List.of(invoiceOne, invoiceTwo)));
+            finalBatchId = finalBatch.id();
+            exportBatchService.generate(finalBatchId, reviewer, new BatchVersionRequest(0L));
+            assertThat(exportWorker.processNext()).isTrue();
+            ExportBatchVO finalGenerated = exportBatchService.detail(finalBatchId);
+            exportBatchService.download(finalBatchId, finalGenerated.artifacts().getFirst().id(), reviewer);
+        }
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), admin)) {
+            var submitted = externalStatusService.append(finalBatchId, admin,
+                    new CreateExternalEventRequest("STATUS_CHANGE", "SUBMITTED_EXTERNAL",
+                            "已重新提交校外流程", List.of(), 2L));
+            var corrected = externalStatusService.correct(finalBatchId, submitted.id(), admin,
                     new CorrectExternalEventRequest("RETURNED_EXTERNAL", "对方实际退回",
                             List.of(), 3L));
             assertThat(corrected.correctionOfEventId()).isEqualTo(submitted.id());
-            externalStatusService.append(activeBatchId, admin,
+            externalStatusService.append(finalBatchId, admin,
                     new CreateExternalEventRequest("STATUS_CHANGE", "COMPLETED",
                             "校外流程完成", List.of(), 4L));
-            var archived = exportBatchService.archive(activeBatchId, admin,
-                    new BatchVersionRequest(5L));
-            assertThat(archived.status()).isEqualTo("ARCHIVED");
+            assertThat(invoiceStatus(invoiceOne)).isEqualTo("IN_EXPORT_BATCH");
+            assertThat(invoiceStatus(invoiceTwo)).isEqualTo("IN_EXPORT_BATCH");
+            assertThat(applicationStatus(applicationId)).isEqualTo("APPROVED");
+            externalStatusService.append(finalBatchId, admin,
+                    new CreateExternalEventRequest("STATUS_CHANGE", "ARCHIVED",
+                            "校外流程归档", List.of(), 5L));
+            assertThat(exportBatchService.detail(finalBatchId).status()).isEqualTo("ARCHIVED");
+            assertThat(invoiceStatus(invoiceOne)).isEqualTo("ARCHIVED");
+            assertThat(invoiceStatus(invoiceTwo)).isEqualTo("ARCHIVED");
+            assertThat(applicationStatus(applicationId)).isEqualTo("COMPLETED");
 
             long adminVersion = jdbcTemplate.queryForObject("""
                     SELECT version FROM organization_member WHERE organization_id=? AND cas_id=?
@@ -363,6 +440,16 @@ class ReviewWorkflowIntegrationTests {
     private String applicationStatus(String applicationId) {
         return jdbcTemplate.queryForObject("SELECT status FROM application WHERE id=?",
                 String.class, applicationId);
+    }
+
+    private String invoiceStatus(String invoiceId) {
+        return jdbcTemplate.queryForObject("SELECT status FROM invoice WHERE id=?",
+                String.class, invoiceId);
+    }
+
+    private String reservationBatch(String invoiceId) {
+        return jdbcTemplate.query("SELECT batch_id FROM invoice_export_reservation WHERE invoice_id=?",
+                resultSet -> resultSet.next() ? resultSet.getString(1) : null, invoiceId);
     }
 
     private CreateInvoiceRequest invoiceRequest(String fileId, String face, String claimed,

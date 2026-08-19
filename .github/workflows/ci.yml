@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      MYSQL_URL: "jdbc:mysql://127.0.0.1:3306/invoice_management_test?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC"
+      MYSQL_USERNAME: invoice_ci
+      MYSQL_PASSWORD: invoice_ci_password
+      SDU_OIDC_CLIENT_ID: ci-test-client-id
+      SDU_OIDC_CLIENT_SECRET: ci-test-client-secret
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ci_root_password
+          MYSQL_DATABASE: invoice_management_test
+          MYSQL_USER: invoice_ci
+          MYSQL_PASSWORD: invoice_ci_password
+          TZ: UTC
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent -h 127.0.0.1 -uroot -pci_root_password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+          --health-start-period=20s
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Run all tests
+        run: ./mvnw --batch-mode --no-transfer-progress test
+
+      - name: Assert integration tests ran without skips
+        shell: python
+        run: |
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          report_paths = list(Path("target/surefire-reports").glob("TEST-*.xml"))
+          if not report_paths:
+              raise SystemExit("No Surefire XML reports were generated")
+
+          suites = [ET.parse(path).getroot() for path in report_paths]
+          expected_integration = {
+              path.stem
+              for path in Path("src/test/java").rglob("*IntegrationTests.java")
+          }
+          actual_integration = {
+              suite.attrib["name"].rsplit(".", 1)[-1]
+              for suite in suites
+              if suite.attrib.get("name", "").endswith("IntegrationTests")
+          }
+
+          missing = expected_integration - actual_integration
+          skipped = sum(int(suite.attrib.get("skipped", "0")) for suite in suites)
+          total = sum(int(suite.attrib.get("tests", "0")) for suite in suites)
+
+          if missing:
+              raise SystemExit(f"Missing integration test reports: {sorted(missing)}")
+          if skipped:
+              raise SystemExit(f"{skipped} tests were skipped")
+
+          print(
+              f"Verified {total} tests, "
+              f"{len(actual_integration)} integration suites, 0 skipped"
+          )

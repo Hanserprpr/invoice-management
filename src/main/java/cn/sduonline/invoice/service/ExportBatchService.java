@@ -35,7 +35,7 @@ public class ExportBatchService {
 
     private final ExportBatchMapper batchMapper;
     private final ExportBatchInvoiceMapper itemMapper;
-    private final InvoiceExportReservationMapper reservationMapper;
+    private final ExportLifecycleService lifecycle;
     private final ExportArtifactMapper artifactMapper;
     private final AsyncJobMapper jobMapper;
     private final FileObjectMapper fileMapper;
@@ -45,14 +45,14 @@ public class ExportBatchService {
     private final ObjectMapper objectMapper;
 
     public ExportBatchService(ExportBatchMapper batchMapper, ExportBatchInvoiceMapper itemMapper,
-                              InvoiceExportReservationMapper reservationMapper,
+                              ExportLifecycleService lifecycle,
                               ExportArtifactMapper artifactMapper, AsyncJobMapper jobMapper,
                               FileObjectMapper fileMapper, AuthorizationService authorizationService,
                               AuditService auditService, ObjectStorage objectStorage,
                               ObjectMapper objectMapper) {
         this.batchMapper = batchMapper;
         this.itemMapper = itemMapper;
-        this.reservationMapper = reservationMapper;
+        this.lifecycle = lifecycle;
         this.artifactMapper = artifactMapper;
         this.jobMapper = jobMapper;
         this.fileMapper = fileMapper;
@@ -88,6 +88,12 @@ public class ExportBatchService {
         if (candidates.size() != invoiceIds.size()) {
             throw new BusinessException(BizCode.EXPORT_INVOICE_NOT_AVAILABLE, HttpStatus.CONFLICT);
         }
+        if (candidates.stream().anyMatch(row -> "IN_EXPORT_BATCH".equals(row.status()))) {
+            throw new BusinessException(BizCode.EXPORT_INVOICE_RESERVED, HttpStatus.CONFLICT);
+        }
+        if (candidates.stream().anyMatch(row -> !"INTERNALLY_APPROVED".equals(row.status()))) {
+            throw new BusinessException(BizCode.EXPORT_INVOICE_NOT_AVAILABLE, HttpStatus.CONFLICT);
+        }
         String projectId = candidates.getFirst().projectId();
         if (candidates.stream().anyMatch(row -> !projectId.equals(row.projectId()))) {
             throw new BusinessException(BizCode.EXPORT_INVOICE_CROSS_PROJECT, HttpStatus.BAD_REQUEST);
@@ -109,21 +115,16 @@ public class ExportBatchService {
         } catch (DuplicateKeyException exception) {
             throw new BusinessException(BizCode.DUPLICATE_SUBMIT, HttpStatus.CONFLICT);
         }
-        try {
-            Map<String, Candidate> byId = candidates.stream().collect(
-                    java.util.stream.Collectors.toMap(Candidate::invoiceId, row -> row));
-            for (int index = 0; index < invoiceIds.size(); index++) {
-                Candidate row = byId.get(invoiceIds.get(index));
-                itemMapper.insert(ExportBatchInvoice.builder().batchId(id)
-                        .organizationId(organizationId).invoiceId(row.invoiceId())
-                        .sequenceNo(index + 1).snapshotFaceAmount(row.faceAmount())
-                        .snapshotClaimedAmount(row.claimedAmount()).snapshotJson(write(row)).build());
-                reservationMapper.insert(InvoiceExportReservation.builder()
-                        .invoiceId(row.invoiceId()).organizationId(organizationId).batchId(id).build());
-            }
-        } catch (DuplicateKeyException exception) {
-            throw new BusinessException(BizCode.EXPORT_INVOICE_RESERVED, HttpStatus.CONFLICT);
+        Map<String, Candidate> byId = candidates.stream().collect(
+                java.util.stream.Collectors.toMap(Candidate::invoiceId, row -> row));
+        for (int index = 0; index < invoiceIds.size(); index++) {
+            Candidate row = byId.get(invoiceIds.get(index));
+            itemMapper.insert(ExportBatchInvoice.builder().batchId(id)
+                    .organizationId(organizationId).invoiceId(row.invoiceId())
+                    .sequenceNo(index + 1).snapshotFaceAmount(row.faceAmount())
+                    .snapshotClaimedAmount(row.claimedAmount()).snapshotJson(write(row)).build());
         }
+        lifecycle.reserve(batch, invoiceIds);
         auditService.append(organizationId, actorCasId, "EXPORT_BATCH_CREATED", "EXPORT_BATCH", id,
                 "{\"projectId\":\"" + projectId + "\",\"invoiceCount\":" + candidates.size() + "}");
         return toVO(batch);
@@ -138,12 +139,21 @@ public class ExportBatchService {
         AsyncJob active = jobMapper.findActiveForTarget(batch.getOrganizationId(), JOB_TYPE,
                 "EXPORT_BATCH", batchId);
         if (active == null) {
-            jobMapper.insert(AsyncJob.builder().id(UlidGenerator.next())
+            AsyncJob job = AsyncJob.builder().id(UlidGenerator.next())
                     .organizationId(batch.getOrganizationId()).jobType(JOB_TYPE)
                     .targetType("EXPORT_BATCH").targetId(batchId).status("PENDING")
-                    .progress(0).attemptCount(0).maxAttempts(3).createdByCasId(actorCasId).build());
-            auditService.append(batch.getOrganizationId(), actorCasId, "EXPORT_GENERATION_REQUESTED",
-                    "EXPORT_BATCH", batchId, "{\"revisionNo\":" + batch.getRevisionNo() + "}");
+                    .progress(0).attemptCount(0).maxAttempts(3).createdByCasId(actorCasId).build();
+            try {
+                jobMapper.insert(job);
+                auditService.append(batch.getOrganizationId(), actorCasId,
+                        "EXPORT_GENERATION_REQUESTED", "EXPORT_BATCH", batchId,
+                        "{\"revisionNo\":" + batch.getRevisionNo() + "}");
+            } catch (DuplicateKeyException exception) {
+                if (jobMapper.findActiveForTargetForUpdate(batch.getOrganizationId(), JOB_TYPE,
+                        "EXPORT_BATCH", batchId) == null) {
+                    throw exception;
+                }
+            }
         }
         return toVO(batch);
     }
@@ -156,8 +166,6 @@ public class ExportBatchService {
             throw new BusinessException(BizCode.EXPORT_BATCH_NOT_FOUND, HttpStatus.NOT_FOUND);
         }
         authorizationService.requireReviewProject(previous.getProjectId());
-        requireVersion(previous, request.version());
-        if (!Set.of("GENERATED", "EXPORTED").contains(previous.getStatus())) state();
         List<ExportBatchInvoice> snapshots = itemMapper.findForBatch(organizationId, batchId);
         int revision = batchMapper.maxRevision(organizationId, previous.getProjectId(),
                 previous.getBatchNo()) + 1;
@@ -176,11 +184,7 @@ public class ExportBatchService {
                     .snapshotClaimedAmount(snapshot.getSnapshotClaimedAmount())
                     .snapshotJson(snapshot.getSnapshotJson()).build());
         }
-        reservationMapper.transferBatch(organizationId, batchId, newId);
-        previous.setStatus("ARCHIVED");
-        previous.setArchivedAt(Instant.now());
-        previous.setVersion(request.version());
-        if (batchMapper.updateById(previous) != 1) conflict();
+        lifecycle.supersede(previous, newId, request.version());
         auditService.append(organizationId, actorCasId, "EXPORT_BATCH_REVISION_CREATED",
                 "EXPORT_BATCH", newId, "{\"previousBatchId\":\"" + batchId
                         + "\",\"revisionNo\":" + revision + "}");
@@ -191,14 +195,7 @@ public class ExportBatchService {
     public ExportBatchVO cancel(String batchId, String actorCasId, BatchVersionRequest request) {
         ExportBatch batch = requireBatch(batchId);
         authorizationService.requireReviewProject(batch.getProjectId());
-        requireVersion(batch, request.version());
-        if (!Set.of("DRAFT", "GENERATED", "EXPORTED").contains(batch.getStatus())) state();
-        batch.setStatus("CANCELLED");
-        batch.setCancelledAt(Instant.now());
-        batch.setVersion(request.version());
-        if (batchMapper.updateById(batch) != 1) conflict();
-        reservationMapper.deleteForBatch(batch.getOrganizationId(), batchId);
-        batch.setVersion(request.version() + 1);
+        lifecycle.transition(batch, request.version(), ExportLifecycleService.Action.CANCEL);
         auditService.append(batch.getOrganizationId(), actorCasId, "EXPORT_BATCH_CANCELLED",
                 "EXPORT_BATCH", batchId, "{}");
         return toVO(batch);
@@ -239,15 +236,10 @@ public class ExportBatchService {
                                    String target) {
         ExportBatch batch = requireBatch(batchId);
         authorizationService.requireProjectManage(batch.getProjectId());
-        requireVersion(batch, request.version());
-        if ("COMPLETED".equals(target) && !Set.of("EXPORTED", "EXTERNAL_PROCESSING").contains(batch.getStatus())
-                || "ARCHIVED".equals(target) && !"COMPLETED".equals(batch.getStatus())) state();
-        batch.setStatus(target);
-        if ("COMPLETED".equals(target)) batch.setCompletedAt(Instant.now());
-        else batch.setArchivedAt(Instant.now());
-        batch.setVersion(request.version());
-        if (batchMapper.updateById(batch) != 1) conflict();
-        batch.setVersion(request.version() + 1);
+        ExportLifecycleService.Action action = "COMPLETED".equals(target)
+                ? ExportLifecycleService.Action.COMPLETE
+                : ExportLifecycleService.Action.FINAL_ARCHIVE;
+        lifecycle.transition(batch, request.version(), action);
         auditService.append(batch.getOrganizationId(), actorCasId, "EXPORT_BATCH_" + target,
                 "EXPORT_BATCH", batchId, "{}");
         return toVO(batch);

@@ -8,12 +8,14 @@ import cn.sduonline.invoice.data.dto.ProjectDtos.ChangeStateRequest;
 import cn.sduonline.invoice.data.dto.ProjectDtos.CreateProjectRequest;
 import cn.sduonline.invoice.data.dto.ProjectDtos.UpdateProjectRequest;
 import cn.sduonline.invoice.data.enums.BizCode;
+import cn.sduonline.invoice.data.vo.ProjectVO;
 import cn.sduonline.invoice.exception.BusinessException;
 import cn.sduonline.invoice.mapper.OrganizationMemberMapper;
 import cn.sduonline.invoice.service.MemberService;
 import cn.sduonline.invoice.service.OrganizationService;
 import cn.sduonline.invoice.service.ProjectService;
 import cn.sduonline.invoice.tenant.TenantContext;
+import cn.sduonline.invoice.util.UlidGenerator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -154,5 +156,110 @@ class ProjectIntegrationTests {
         try (TenantContext.Scope ignored = TenantContext.open(second.id(), "project-admin-b")) {
             assertThat(projectService.list(1, 20, null).records()).isEmpty();
         }
+    }
+
+    @Test
+    @Transactional
+    void projectSupportsDocumentedTransitionsAndArchivesOnlyTerminalInvoices() {
+        jdbcTemplate.update("""
+                INSERT INTO `user`(cas_id,name,status,is_platform_admin)
+                VALUES ('project-platform-3','平台管理员','ACTIVE',TRUE)
+                """);
+        var organization = organizationService.create("project-platform-3",
+                new CreateOrganizationRequest("项目归档测试社团", "CLUB",
+                        new InitialAdmin("project-admin-c", "管理员丙", null, null)));
+
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), "project-admin-c")) {
+            var terminalProject = createProject("仅有终态发票");
+            String applicationId = insertApplicationWithInvoice(
+                    organization.id(), terminalProject.id(), "project-admin-c", "REJECTED");
+            insertInvoice(organization.id(), applicationId, "project-admin-c", "VOIDED");
+
+            var archived = projectService.archive(terminalProject.id(), "project-admin-c",
+                    new ChangeStateRequest(terminalProject.version()));
+            assertThat(archived.status()).isEqualTo("ARCHIVED");
+            assertThat(jdbcTemplate.queryForList(
+                    "SELECT status FROM invoice WHERE application_id=? ORDER BY id",
+                    String.class, applicationId)).containsOnly("ARCHIVED");
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT status FROM application WHERE id=?", String.class, applicationId))
+                    .isEqualTo("COMPLETED");
+
+            var collectingProject = createProject("收集中直接归档");
+            var collecting = projectService.open(collectingProject.id(), "project-admin-c",
+                    new ChangeStateRequest(collectingProject.version()));
+            assertThat(projectService.archive(collecting.id(), "project-admin-c",
+                    new ChangeStateRequest(collecting.version())).status()).isEqualTo("ARCHIVED");
+
+            var reopenedProject = createProject("整理中退回收集停止");
+            var opened = projectService.open(reopenedProject.id(), "project-admin-c",
+                    new ChangeStateRequest(reopenedProject.version()));
+            var stopped = projectService.stopCollection(reopenedProject.id(), "project-admin-c",
+                    new ChangeStateRequest(opened.version()));
+            var organizing = projectService.startOrganizing(reopenedProject.id(), "project-admin-c",
+                    new ChangeStateRequest(stopped.version()));
+            assertThat(projectService.stopCollection(reopenedProject.id(), "project-admin-c",
+                    new ChangeStateRequest(organizing.version())).status())
+                    .isEqualTo("COLLECTION_STOPPED");
+
+            var activeProject = createProject("仍有处理中发票");
+            String activeApplicationId = insertApplicationWithInvoice(
+                    organization.id(), activeProject.id(), "project-admin-c", "SUBMITTED");
+            assertThatThrownBy(() -> projectService.archive(activeProject.id(), "project-admin-c",
+                    new ChangeStateRequest(activeProject.version())))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode())
+                                    .isEqualTo(BizCode.PROJECT_STATE_NOT_ALLOWED));
+            assertThat(projectService.detail(activeProject.id()).status()).isEqualTo("DRAFT");
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT status FROM invoice WHERE application_id=?", String.class,
+                    activeApplicationId)).isEqualTo("SUBMITTED");
+        }
+    }
+
+    private ProjectVO createProject(String name) {
+        return projectService.create("project-admin-c", new CreateProjectRequest(
+                name, null, null, null, false, "ALL", null, null,
+                List.of("project-admin-c"), List.of()));
+    }
+
+    private String insertApplicationWithInvoice(String organizationId, String projectId,
+                                                String casId, String invoiceStatus) {
+        String formId = UlidGenerator.next();
+        String formVersionId = UlidGenerator.next();
+        String applicationId = UlidGenerator.next();
+        jdbcTemplate.update("""
+                INSERT INTO application_form(id,organization_id,project_id,name,status,
+                  submission_scope,max_submissions_per_user,draft_schema_json,created_by_cas_id)
+                VALUES (?,?,?,'归档测试表单','PUBLISHED','ALL_MEMBERS',1,
+                  JSON_OBJECT('fields',JSON_ARRAY()),?)
+                """, formId, organizationId, projectId, casId);
+        jdbcTemplate.update("""
+                INSERT INTO form_version(id,organization_id,form_id,version_no,schema_json,
+                  published_by_cas_id) VALUES (?,?,?,1,JSON_OBJECT(),?)
+                """, formVersionId, organizationId, formId, casId);
+        jdbcTemplate.update("""
+                INSERT INTO application(id,organization_id,form_version_id,applicant_cas_id,
+                  answers_json,status) VALUES (?,?,?,?,JSON_OBJECT(),?)
+                """, applicationId, organizationId, formVersionId, casId,
+                "SUBMITTED".equals(invoiceStatus) ? "SUBMITTED" : "REJECTED");
+        insertInvoice(organizationId, applicationId, casId, invoiceStatus);
+        return applicationId;
+    }
+
+    private void insertInvoice(String organizationId, String applicationId,
+                               String casId, String status) {
+        String fileId = UlidGenerator.next();
+        jdbcTemplate.update("""
+                INSERT INTO file_object(id,organization_id,uploader_cas_id,storage_key,
+                  original_name,content_type,size_bytes,sha256,purpose,scan_status,ready_at)
+                VALUES (?,?,?,?,'invoice.pdf','application/pdf',1,?,'INVOICE','READY',NOW(3))
+                """, fileId, organizationId, casId, "project-archive/" + fileId,
+                "a".repeat(64));
+        jdbcTemplate.update("""
+                INSERT INTO invoice(id,organization_id,application_id,invoice_type,face_amount,
+                  claimed_amount,current_file_id,status)
+                VALUES (?,?,?,'VAT_ELECTRONIC',100.00,100.00,?,?)
+                """, UlidGenerator.next(), organizationId, applicationId, fileId, status);
     }
 }

@@ -40,6 +40,10 @@ management:
       application: ${spring.application.name}
 
 app:
+  idempotency:
+    ttl: ${IDEMPOTENCY_TTL:5m}
+    cleanup-interval: ${IDEMPOTENCY_CLEANUP_INTERVAL:1h}
+    cleanup-batch-size: ${IDEMPOTENCY_CLEANUP_BATCH_SIZE:1000}
   rate-limit:
     enabled: ${RATE_LIMIT_ENABLED:false}
     requests: ${RATE_LIMIT_REQUESTS:60}

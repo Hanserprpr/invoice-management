@@ -1,8 +1,10 @@
 package cn.sduonline.invoice.service;
 
 import cn.sduonline.invoice.data.po.AsyncJob;
+import cn.sduonline.invoice.data.po.Invoice;
 import cn.sduonline.invoice.data.po.RecognitionSuggestion;
 import cn.sduonline.invoice.mapper.AsyncJobMapper;
+import cn.sduonline.invoice.mapper.RecognitionInvoiceMapper;
 import cn.sduonline.invoice.mapper.RecognitionSuggestionMapper;
 import cn.sduonline.invoice.recognition.InvoiceRecognitionAdapter.RecognitionResult;
 import cn.sduonline.invoice.recognition.InvoiceRecognitionAdapter.SuggestedField;
@@ -23,46 +25,102 @@ public class RecognitionResultService {
             "invoiceType", "invoiceCode", "invoiceNumber", "digitalInvoiceNo",
             "invoiceDate", "buyerName", "buyerTaxNo", "sellerName", "sellerTaxNo",
             "faceAmount");
+    private static final Set<String> LANDABLE_STATES = Set.of(
+            "DRAFT", "RETURNED", "PENDING_RECOGNITION");
 
     private final RecognitionSuggestionMapper suggestionMapper;
     private final AsyncJobMapper jobMapper;
+    private final RecognitionInvoiceMapper invoiceMapper;
+    private final AsyncJobClaimService claimService;
     private final ObjectMapper objectMapper;
 
     public RecognitionResultService(RecognitionSuggestionMapper suggestionMapper,
-                                    AsyncJobMapper jobMapper, ObjectMapper objectMapper) {
+                                    AsyncJobMapper jobMapper,
+                                    RecognitionInvoiceMapper invoiceMapper,
+                                    AsyncJobClaimService claimService,
+                                    ObjectMapper objectMapper) {
         this.suggestionMapper = suggestionMapper;
         this.jobMapper = jobMapper;
+        this.invoiceMapper = invoiceMapper;
+        this.claimService = claimService;
         this.objectMapper = objectMapper;
     }
 
     @Transactional
     public void persist(AsyncJob job, RecognitionResult result) {
+        Invoice invoice = invoiceMapper.lockById(job.getOrganizationId(), job.getTargetId());
+        AsyncJob currentJob = jobMapper.lockById(job.getId());
+        if (currentJob == null || !"RUNNING".equals(currentJob.getStatus())) {
+            throw new IllegalStateException("RECOGNITION_JOB_NOT_RUNNING");
+        }
+        if (invoice == null || !LANDABLE_STATES.contains(invoice.getStatus())) {
+            Map<String, Object> discarded = new LinkedHashMap<>();
+            discarded.put("outcome", invoice != null && "SUBMITTED".equals(invoice.getStatus())
+                    ? "DISCARDED_SUBMITTED" : "DISCARDED_STATE_CHANGED");
+            discarded.put("invoiceStatus", invoice == null ? "MISSING" : invoice.getStatus());
+            discarded.put("suggestionCount", 0);
+            succeed(job, discarded);
+            return;
+        }
         suggestionMapper.delete(new LambdaQueryWrapper<RecognitionSuggestion>()
                 .eq(RecognitionSuggestion::getOrganizationId, job.getOrganizationId())
                 .eq(RecognitionSuggestion::getSourceJobId, job.getId()));
         Map<String, SuggestedField> fields =
                 result.fields() == null ? Map.of() : result.fields();
+        long suggestionCount = 0;
         if (result.available()) {
-            fields.entrySet().stream()
-                    .filter(entry -> FIELDS.contains(entry.getKey()))
-                    .filter(entry -> entry.getValue() != null && entry.getValue().value() != null)
-                    .forEach(entry -> suggestionMapper.insert(RecognitionSuggestion.builder()
-                            .id(UlidGenerator.next()).organizationId(job.getOrganizationId())
-                            .invoiceId(job.getTargetId()).sourceJobId(job.getId())
-                            .fieldPath(entry.getKey())
-                            .suggestedValue(truncate(entry.getValue().value(), 10_000))
-                            .confidence(normalizeConfidence(entry.getValue().confidence()))
-                            .status("PENDING").build()));
+            for (Map.Entry<String, SuggestedField> entry : fields.entrySet()) {
+                if (!FIELDS.contains(entry.getKey()) || entry.getValue() == null
+                        || entry.getValue().value() == null) {
+                    continue;
+                }
+                suggestionMapper.insert(RecognitionSuggestion.builder()
+                        .id(UlidGenerator.next()).organizationId(job.getOrganizationId())
+                        .invoiceId(job.getTargetId()).sourceJobId(job.getId())
+                        .fieldPath(entry.getKey())
+                        .suggestedValue(truncate(entry.getValue().value(), 10_000))
+                        .confidence(normalizeConfidence(entry.getValue().confidence()))
+                        .status("PENDING").build());
+                suggestionCount++;
+            }
+        }
+        if (suggestionCount > 0 && "DRAFT".equals(invoice.getStatus())) {
+            if (invoiceMapper.markPendingIfDraft(job.getOrganizationId(), job.getTargetId()) != 1) {
+                throw new IllegalStateException("INVOICE_STATE_CHANGED");
+            }
+        } else if (suggestionCount == 0 && "PENDING_RECOGNITION".equals(invoice.getStatus())
+                && invoiceMapper.restoreDraftIfPending(
+                job.getOrganizationId(), job.getTargetId()) != 1) {
+            throw new IllegalStateException("INVOICE_STATE_CHANGED");
         }
         Map<String, Object> jobResult = new LinkedHashMap<>();
         jobResult.put("outcome", result.available() ? "SUGGESTIONS_READY" : "MANUAL_ENTRY");
         jobResult.put("rawText", truncate(result.rawText(), 100_000));
         jobResult.put("qrRaw", truncate(result.qrRaw(), 10_000));
-        jobResult.put("suggestionCount", result.available()
-                ? fields.keySet().stream().filter(FIELDS::contains).count() : 0);
+        jobResult.put("suggestionCount", suggestionCount);
+        succeed(job, jobResult);
+    }
+
+    @Transactional
+    public void recordFailure(AsyncJob job, String errorCode, String errorMessage) {
+        Invoice invoice = invoiceMapper.lockById(job.getOrganizationId(), job.getTargetId());
+        AsyncJob currentJob = jobMapper.lockById(job.getId());
+        if (currentJob == null || !"RUNNING".equals(currentJob.getStatus())) return;
+        claimService.retryOrFail(currentJob, errorCode, errorMessage);
+        if (invoice != null && "PENDING_RECOGNITION".equals(invoice.getStatus())) {
+            invoiceMapper.restoreDraftIfPending(job.getOrganizationId(), job.getTargetId());
+        }
+    }
+
+    private void succeed(AsyncJob job, Map<String, Object> jobResult) {
         try {
-            jobMapper.succeed(job.getId(), objectMapper.writeValueAsString(jobResult));
+            if (jobMapper.succeed(job.getId(), objectMapper.writeValueAsString(jobResult)) != 1) {
+                throw new IllegalStateException("RECOGNITION_JOB_NOT_RUNNING");
+            }
         } catch (Exception exception) {
+            if (exception instanceof IllegalStateException illegalStateException) {
+                throw illegalStateException;
+            }
             throw new IllegalStateException("RECOGNITION_RESULT_SERIALIZATION_FAILED", exception);
         }
     }

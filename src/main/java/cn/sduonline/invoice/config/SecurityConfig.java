@@ -5,6 +5,7 @@ import cn.sduonline.invoice.security.SecurityErrorWriter;
 import cn.sduonline.invoice.data.enums.BizCode;
 import cn.sduonline.invoice.tenant.TenantContextFilter;
 import cn.sduonline.invoice.security.RedisRateLimitFilter;
+import cn.sduonline.invoice.security.IdempotencyFilter;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -70,6 +71,7 @@ public class SecurityConfig {
             SduOidcUserService sduOidcUserService,
             SecurityErrorWriter securityErrorWriter,
             TenantContextFilter tenantContextFilter,
+            IdempotencyFilter idempotencyFilter,
             ObjectProvider<RedisRateLimitFilter> rateLimitFilter,
             @Value("${app.security.oidc.success-url}") String successUrl
     ) throws Exception {
@@ -97,6 +99,7 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.csrfTokenRepository(
                         CookieCsrfTokenRepository.withHttpOnlyFalse()))
                 .addFilterAfter(tenantContextFilter, AnonymousAuthenticationFilter.class)
+                .addFilterAfter(idempotencyFilter, TenantContextFilter.class)
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(securityErrorWriter)
                         .accessDeniedHandler(securityErrorWriter)

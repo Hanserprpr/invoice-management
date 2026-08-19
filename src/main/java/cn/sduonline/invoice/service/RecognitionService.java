@@ -11,10 +11,12 @@ import cn.sduonline.invoice.exception.BusinessException;
 import cn.sduonline.invoice.mapper.AsyncJobMapper;
 import cn.sduonline.invoice.mapper.InvoiceMapper;
 import cn.sduonline.invoice.mapper.LedgerMapper;
+import cn.sduonline.invoice.mapper.RecognitionInvoiceMapper;
 import cn.sduonline.invoice.mapper.RecognitionSuggestionMapper;
 import cn.sduonline.invoice.tenant.TenantContext;
 import cn.sduonline.invoice.util.UlidGenerator;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +31,7 @@ import java.util.Set;
 @Service
 public class RecognitionService {
     private final InvoiceMapper invoiceMapper;
+    private final RecognitionInvoiceMapper recognitionInvoiceMapper;
     private final AsyncJobMapper jobMapper;
     private final RecognitionSuggestionMapper suggestionMapper;
     private final LedgerMapper ledgerMapper;
@@ -36,12 +39,15 @@ public class RecognitionService {
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
 
-    public RecognitionService(InvoiceMapper invoiceMapper, AsyncJobMapper jobMapper,
+    public RecognitionService(InvoiceMapper invoiceMapper,
+                              RecognitionInvoiceMapper recognitionInvoiceMapper,
+                              AsyncJobMapper jobMapper,
                               RecognitionSuggestionMapper suggestionMapper,
                               LedgerMapper ledgerMapper,
                               AuthorizationService authorizationService,
                               AuditService auditService, ObjectMapper objectMapper) {
         this.invoiceMapper = invoiceMapper;
+        this.recognitionInvoiceMapper = recognitionInvoiceMapper;
         this.jobMapper = jobMapper;
         this.suggestionMapper = suggestionMapper;
         this.ledgerMapper = ledgerMapper;
@@ -52,19 +58,35 @@ public class RecognitionService {
 
     @Transactional
     public RecognitionJobVO start(String invoiceId, String actorCasId) {
-        Invoice invoice = requireAccessible(invoiceId);
-        if (Set.of("VOIDED", "ARCHIVED").contains(invoice.getStatus())) {
+        Invoice owned = requireOwned(invoiceId, actorCasId);
+        Invoice invoice = recognitionInvoiceMapper.lockById(owned.getOrganizationId(), invoiceId);
+        if (invoice == null) {
+            throw new BusinessException(BizCode.INVOICE_NOT_FOUND, HttpStatus.NOT_FOUND);
+        }
+        AsyncJob active = jobMapper.findActiveForTargetForUpdate(invoice.getOrganizationId(),
+                RecognitionWorker.JOB_TYPE, "INVOICE", invoiceId);
+        if (active != null) {
+            prepareInvoiceForStart(invoice, true);
+            return toJobVO(active);
+        }
+        if (!Set.of("DRAFT", "RETURNED").contains(invoice.getStatus())) {
             throw new BusinessException(BizCode.INVOICE_STATE_NOT_ALLOWED, HttpStatus.CONFLICT);
         }
-        AsyncJob active = jobMapper.findActiveForTarget(invoice.getOrganizationId(),
-                RecognitionWorker.JOB_TYPE, "INVOICE", invoiceId);
-        if (active != null) return toJobVO(active);
         AsyncJob job = AsyncJob.builder().id(UlidGenerator.next())
                 .organizationId(invoice.getOrganizationId())
                 .jobType(RecognitionWorker.JOB_TYPE).targetType("INVOICE").targetId(invoiceId)
                 .status("PENDING").progress(0).attemptCount(0).maxAttempts(3)
                 .createdByCasId(actorCasId).build();
-        jobMapper.insert(job);
+        try {
+            jobMapper.insert(job);
+        } catch (DuplicateKeyException exception) {
+            AsyncJob winner = jobMapper.findActiveForTargetForUpdate(invoice.getOrganizationId(),
+                    RecognitionWorker.JOB_TYPE, "INVOICE", invoiceId);
+            if (winner == null) throw exception;
+            prepareInvoiceForStart(invoice, true);
+            return toJobVO(winner);
+        }
+        prepareInvoiceForStart(invoice, false);
         auditService.append(invoice.getOrganizationId(), actorCasId,
                 "INVOICE_RECOGNITION_REQUESTED", "INVOICE", invoiceId,
                 "{\"jobId\":\"" + job.getId() + "\"}");
@@ -95,8 +117,14 @@ public class RecognitionService {
     @Transactional
     public List<RecognitionSuggestionVO> confirm(String invoiceId, String actorCasId,
                                                   ConfirmSuggestionsRequest request) {
-        Invoice invoice = requireAccessible(invoiceId);
-        if (!Set.of("DRAFT", "RETURNED").contains(invoice.getStatus())) {
+        Invoice owned = requireOwned(invoiceId, actorCasId);
+        Invoice invoice = recognitionInvoiceMapper.lockById(owned.getOrganizationId(), invoiceId);
+        if (invoice == null) {
+            throw new BusinessException(BizCode.INVOICE_NOT_FOUND, HttpStatus.NOT_FOUND);
+        }
+        AsyncJob active = jobMapper.findActiveForTargetForUpdate(invoice.getOrganizationId(),
+                RecognitionWorker.JOB_TYPE, "INVOICE", invoiceId);
+        if (!Set.of("DRAFT", "RETURNED", "PENDING_RECOGNITION").contains(invoice.getStatus())) {
             throw new BusinessException(BizCode.INVOICE_STATE_NOT_ALLOWED, HttpStatus.CONFLICT);
         }
         Set<String> ids = new HashSet<>();
@@ -120,10 +148,49 @@ public class RecognitionService {
                 throw new BusinessException(BizCode.STATE_NOT_ALLOWED, HttpStatus.CONFLICT);
             }
         }
+        long pending = suggestionMapper.selectCount(new LambdaQueryWrapper<RecognitionSuggestion>()
+                .eq(RecognitionSuggestion::getOrganizationId, invoice.getOrganizationId())
+                .eq(RecognitionSuggestion::getInvoiceId, invoiceId)
+                .eq(RecognitionSuggestion::getStatus, "PENDING"));
+        if (pending == 0 && "PENDING_RECOGNITION".equals(invoice.getStatus())
+                && active == null) {
+            if (recognitionInvoiceMapper.restoreDraftIfPending(
+                    invoice.getOrganizationId(), invoiceId) != 1) {
+                throw new BusinessException(BizCode.VERSION_CONFLICT, HttpStatus.CONFLICT);
+            }
+        }
         auditService.append(invoice.getOrganizationId(), actorCasId,
                 "RECOGNITION_SUGGESTIONS_CONFIRMED", "INVOICE", invoiceId,
                 "{\"count\":" + request.decisions().size() + "}");
         return suggestions(invoiceId);
+    }
+
+    private Invoice requireOwned(String invoiceId, String actorCasId) {
+        String currentCasId = TenantContext.requireCasId();
+        if (!currentCasId.equals(actorCasId)) {
+            throw new BusinessException(BizCode.INVOICE_NOT_FOUND, HttpStatus.NOT_FOUND);
+        }
+        Invoice invoice = recognitionInvoiceMapper.findOwnedById(
+                TenantContext.requireOrganizationId(), invoiceId, currentCasId);
+        if (invoice == null) {
+            throw new BusinessException(BizCode.INVOICE_NOT_FOUND, HttpStatus.NOT_FOUND);
+        }
+        return invoice;
+    }
+
+    private void prepareInvoiceForStart(Invoice invoice, boolean allowAlreadyPending) {
+        if ("DRAFT".equals(invoice.getStatus())) {
+            if (recognitionInvoiceMapper.markPendingIfDraft(
+                    invoice.getOrganizationId(), invoice.getId()) != 1) {
+                throw new BusinessException(BizCode.VERSION_CONFLICT, HttpStatus.CONFLICT);
+            }
+            return;
+        }
+        if ("RETURNED".equals(invoice.getStatus())
+                || (allowAlreadyPending && "PENDING_RECOGNITION".equals(invoice.getStatus()))) {
+            return;
+        }
+        throw new BusinessException(BizCode.INVOICE_STATE_NOT_ALLOWED, HttpStatus.CONFLICT);
     }
 
     private Invoice requireAccessible(String invoiceId) {

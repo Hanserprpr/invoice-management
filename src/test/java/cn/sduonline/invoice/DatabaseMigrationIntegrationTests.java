@@ -20,8 +20,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+
+import org.springframework.dao.DuplicateKeyException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -67,7 +70,63 @@ class DatabaseMigrationIntegrationTests {
                 WHERE table_schema=DATABASE() AND table_name='application_form'
                   AND column_name='draft_schema_json'
                 """, String.class)).isEqualTo("json:NO");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT EXTRA FROM information_schema.columns
+                WHERE table_schema=DATABASE() AND table_name='async_job'
+                  AND column_name='active_slot'
+                """, String.class)).isEqualTo("STORED GENERATED");
+        assertThat(jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.statistics
+                WHERE table_schema=DATABASE() AND table_name='async_job'
+                  AND index_name='uk_async_job_active_target' AND non_unique=0
+                """, Integer.class)).isEqualTo(5);
         assertThat(flyway.migrate().migrationsExecuted).isZero();
+    }
+
+    @Test
+    void onlyOneActiveJobMayExistForTheSameTarget() throws Exception {
+        String organizationId = "01KACTIVEJOB00000000000001";
+        jdbcTemplate.update("INSERT INTO `user`(cas_id,name,status,is_platform_admin) VALUES ('active-job-user','Active Job','ACTIVE',FALSE)");
+        jdbcTemplate.update("INSERT INTO organization(id,name,type,status) VALUES (?,?,?,?)",
+                organizationId, "Active job organization", "CLUB", "ACTIVE");
+        try {
+            CountDownLatch ready = new CountDownLatch(2);
+            CountDownLatch start = new CountDownLatch(1);
+            try (var executor = Executors.newFixedThreadPool(2)) {
+                var first = executor.submit(() -> insertActiveJob(
+                        "01KACTIVEJOB00000000000011", organizationId, ready, start));
+                var second = executor.submit(() -> insertActiveJob(
+                        "01KACTIVEJOB00000000000012", organizationId, ready, start));
+                assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+                start.countDown();
+                assertThat(List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS)))
+                        .containsExactlyInAnyOrder(true, false);
+            }
+
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM async_job WHERE organization_id=?
+                      AND job_type='INVOICE_RECOGNITION' AND target_id='same-target'
+                      AND status IN ('PENDING','RUNNING')
+                    """, Integer.class, organizationId)).isEqualTo(1);
+            jdbcTemplate.update("""
+                    UPDATE async_job SET status='SUCCEEDED' WHERE organization_id=?
+                      AND job_type='INVOICE_RECOGNITION' AND target_id='same-target'
+                    """, organizationId);
+            jdbcTemplate.update("""
+                    INSERT INTO async_job(id,organization_id,job_type,target_type,target_id,status,
+                      progress,attempt_count,max_attempts,created_by_cas_id)
+                    VALUES ('01KACTIVEJOB00000000000013',?,'INVOICE_RECOGNITION','INVOICE',
+                      'same-target','PENDING',0,0,3,'active-job-user')
+                    """, organizationId);
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM async_job WHERE organization_id=?
+                      AND job_type='INVOICE_RECOGNITION' AND target_id='same-target'
+                    """, Integer.class, organizationId)).isEqualTo(2);
+        } finally {
+            jdbcTemplate.update("DELETE FROM async_job WHERE organization_id=?", organizationId);
+            jdbcTemplate.update("DELETE FROM organization WHERE id=?", organizationId);
+            jdbcTemplate.update("DELETE FROM `user` WHERE cas_id='active-job-user'");
+        }
     }
 
     @Test
@@ -147,6 +206,23 @@ class DatabaseMigrationIntegrationTests {
             jdbcTemplate.update("DELETE FROM async_job WHERE organization_id=?", organizationId);
             jdbcTemplate.update("DELETE FROM organization WHERE id=?", organizationId);
             jdbcTemplate.update("DELETE FROM `user` WHERE cas_id='d5-worker'");
+        }
+    }
+
+    private boolean insertActiveJob(String jobId, String organizationId,
+                                    CountDownLatch ready, CountDownLatch start) throws Exception {
+        ready.countDown();
+        start.await(10, TimeUnit.SECONDS);
+        try {
+            jdbcTemplate.update("""
+                    INSERT INTO async_job(id,organization_id,job_type,target_type,target_id,status,
+                      progress,attempt_count,max_attempts,created_by_cas_id)
+                    VALUES (? ,?,'INVOICE_RECOGNITION','INVOICE','same-target','PENDING',
+                      0,0,3,'active-job-user')
+                    """, jobId, organizationId);
+            return true;
+        } catch (DuplicateKeyException exception) {
+            return false;
         }
     }
 }

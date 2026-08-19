@@ -13,8 +13,10 @@ import cn.sduonline.invoice.data.vo.PageResult;
 import cn.sduonline.invoice.data.vo.ProjectVO;
 import cn.sduonline.invoice.data.vo.ProjectVO.AccessGrantVO;
 import cn.sduonline.invoice.exception.BusinessException;
+import cn.sduonline.invoice.mapper.ApplicationMapper;
 import cn.sduonline.invoice.mapper.OrganizationMemberMapper;
 import cn.sduonline.invoice.mapper.ProjectAccessMapper;
+import cn.sduonline.invoice.mapper.ProjectLifecycleMapper;
 import cn.sduonline.invoice.mapper.ProjectManagerMapper;
 import cn.sduonline.invoice.mapper.ProjectMapper;
 import cn.sduonline.invoice.tenant.TenantContext;
@@ -41,6 +43,8 @@ public class ProjectService {
             "DRAFT", "COLLECTING", "COLLECTION_STOPPED", "ORGANIZING", "ARCHIVED");
 
     private final ProjectMapper projectMapper;
+    private final ProjectLifecycleMapper projectLifecycleMapper;
+    private final ApplicationMapper applicationMapper;
     private final ProjectManagerMapper projectManagerMapper;
     private final ProjectAccessMapper projectAccessMapper;
     private final OrganizationMemberMapper memberMapper;
@@ -49,6 +53,8 @@ public class ProjectService {
     private final RuleSetService ruleSetService;
 
     public ProjectService(ProjectMapper projectMapper,
+                          ProjectLifecycleMapper projectLifecycleMapper,
+                          ApplicationMapper applicationMapper,
                           ProjectManagerMapper projectManagerMapper,
                           ProjectAccessMapper projectAccessMapper,
                           OrganizationMemberMapper memberMapper,
@@ -56,6 +62,8 @@ public class ProjectService {
                           AuditService auditService,
                           RuleSetService ruleSetService) {
         this.projectMapper = projectMapper;
+        this.projectLifecycleMapper = projectLifecycleMapper;
+        this.applicationMapper = applicationMapper;
         this.projectManagerMapper = projectManagerMapper;
         this.projectAccessMapper = projectAccessMapper;
         this.memberMapper = memberMapper;
@@ -177,7 +185,7 @@ public class ProjectService {
     public ProjectVO stopCollection(String projectId, String actorCasId, ChangeStateRequest request) {
         Project project = requireProject(projectId);
         authorizationService.requireProjectManage(projectId);
-        if (!"COLLECTING".equals(project.getStatus())) throw stateConflict();
+        if (!Set.of("COLLECTING", "ORGANIZING").contains(project.getStatus())) throw stateConflict();
         return changeState(project, actorCasId, request.version(), "COLLECTION_STOPPED",
                 "PROJECT_COLLECTION_STOPPED");
     }
@@ -195,7 +203,18 @@ public class ProjectService {
     public ProjectVO archive(String projectId, String actorCasId, ChangeStateRequest request) {
         Project project = requireProject(projectId);
         authorizationService.requireProjectManage(projectId);
-        if (!"ORGANIZING".equals(project.getStatus())) throw stateConflict();
+        if (!Set.of("DRAFT", "COLLECTING", "ORGANIZING").contains(project.getStatus())) {
+            throw stateConflict();
+        }
+        if (projectLifecycleMapper.countUnresolvedInvoices(
+                project.getOrganizationId(), projectId) > 0) {
+            throw stateConflict();
+        }
+        List<String> applicationIds = projectLifecycleMapper.findTerminalApplicationIds(
+                project.getOrganizationId(), projectId);
+        projectLifecycleMapper.archiveTerminalInvoices(project.getOrganizationId(), projectId);
+        applicationIds.forEach(applicationId -> applicationMapper.refreshDerivedStatus(
+                project.getOrganizationId(), applicationId));
         project.setArchivedAt(Instant.now());
         return changeState(project, actorCasId, request.version(), "ARCHIVED", "PROJECT_ARCHIVED");
     }
