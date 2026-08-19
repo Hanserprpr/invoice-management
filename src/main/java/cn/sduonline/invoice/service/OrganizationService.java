@@ -22,7 +22,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
 import java.util.List;
 
 @Service
@@ -100,7 +99,7 @@ public class OrganizationService {
             Role clubAdmin = roleMapper.findByCode("CLUB_ADMIN");
             memberRoleMapper.insert(OrganizationMemberRole.builder()
                     .memberId(member.getId()).organizationId(organizationId)
-                    .roleId(clubAdmin.getId()).effectiveFrom(Instant.now())
+                    .roleId(clubAdmin.getId()).effectiveFrom(memberRoleMapper.currentTimestamp())
                     .assignedByCasId(actorCasId).build());
             dictionaryTemplateService.clonePublishedTemplates(organizationId, actorCasId);
             auditService.append(organizationId, actorCasId, "ORGANIZATION_CREATED",

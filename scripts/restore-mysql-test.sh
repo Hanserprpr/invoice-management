@@ -29,9 +29,21 @@ else
 fi
 gzip -t "$backup"
 export MYSQL_PWD="$MYSQL_PASSWORD"
-gzip -dc "$backup" | mysql --host="$MYSQL_HOST" --port="$MYSQL_PORT" \
-  --user="$MYSQL_USERNAME" --default-character-set=utf8mb4 "$MYSQL_DATABASE"
+initial_table_count=$(mysql --host="$MYSQL_HOST" --port="$MYSQL_PORT" --user="$MYSQL_USERNAME" \
+  --batch --skip-column-names -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}'")
+if [[ "$initial_table_count" != "0" ]]; then
+  echo "refusing restore: $MYSQL_DATABASE is not empty ($initial_table_count tables)" >&2
+  exit 3
+fi
+if ! gzip -dc "$backup" | mysql --host="$MYSQL_HOST" --port="$MYSQL_PORT" \
+  --user="$MYSQL_USERNAME" --default-character-set=utf8mb4 "$MYSQL_DATABASE"; then
+  echo "restore failed: $MYSQL_DATABASE may contain partial data and must be recreated" >&2
+  exit 4
+fi
 table_count=$(mysql --host="$MYSQL_HOST" --port="$MYSQL_PORT" --user="$MYSQL_USERNAME" \
   --batch --skip-column-names -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_type='BASE TABLE'")
 test "$table_count" -ge 43
+failed_migrations=$(mysql --host="$MYSQL_HOST" --port="$MYSQL_PORT" --user="$MYSQL_USERNAME" \
+  --batch --skip-column-names "$MYSQL_DATABASE" -e "SELECT COUNT(*) FROM flyway_schema_history WHERE success=0")
+test "$failed_migrations" -eq 0
 echo "restore verified in $MYSQL_DATABASE ($table_count tables including Flyway history)"

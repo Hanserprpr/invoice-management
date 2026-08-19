@@ -21,11 +21,17 @@ public class RuleSetController {
         this.service = service;
     }
 
+    /**
+     * 获取当前组织的规则集列表。
+     */
     @GetMapping
     public Result<List<RuleSetVO>> list() {
         return Result.ok(service.list());
     }
 
+    /**
+     * 创建规则集。
+     */
     @PostMapping
     public ResponseEntity<Result<RuleSetVO>> create(Authentication authentication,
                                                     @Valid @RequestBody CreateRuleSetRequest request) {
@@ -33,12 +39,18 @@ public class RuleSetController {
                 .body(Result.ok(service.create(authentication.getName(), request)));
     }
 
+    /**
+     * 更新指定规则集。
+     */
     @PatchMapping("/{id}")
     public Result<RuleSetVO> update(@PathVariable String id, Authentication authentication,
                                     @Valid @RequestBody UpdateRuleSetRequest request) {
         return Result.ok(service.update(id, authentication.getName(), request));
     }
 
+    /**
+     * 发布指定规则集的新版本。
+     */
     @PostMapping("/{id}/versions")
     public ResponseEntity<Result<RuleSetVO.VersionVO>> publish(
             @PathVariable String id, Authentication authentication,

@@ -22,11 +22,17 @@ public class AuthController {
         this.userMapper = userMapper;
     }
 
+    /**
+     * 获取统一身份认证的登录入口。
+     */
     @GetMapping("/login-url")
     public Result<Map<String, String>> loginUrl() {
         return Result.ok(Map.of("url", "/oauth2/authorization/sdu"));
     }
 
+    /**
+     * 获取当前已登录用户的身份与权限信息。
+     */
     @GetMapping({"/me", "/login/success"})
     public Result<CurrentUserVO> currentUser(
             @AuthenticationPrincipal OidcUser oidcUser
@@ -37,6 +43,9 @@ public class AuthController {
                 Boolean.TRUE.equals(user.getIsPlatformAdmin())));
     }
 
+    /**
+     * 处理退出登录成功后的响应。
+     */
     @GetMapping("/logout/success")
     public Result<Void> logoutSuccess() {
         return Result.ok();

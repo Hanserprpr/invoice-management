@@ -18,9 +18,15 @@ public class HandoverController {
     private final HandoverService service;
     public HandoverController(HandoverService service) { this.service = service; }
 
+    /**
+     * 获取纸质票据交接记录。
+     */
     @GetMapping
     public Result<List<HandoverRecordVO>> list() { return Result.ok(service.list()); }
 
+    /**
+     * 创建纸质票据交接记录。
+     */
     @PostMapping
     public ResponseEntity<Result<HandoverRecordVO>> create(
             Authentication authentication, @Valid @RequestBody CreateHandoverRequest request) {

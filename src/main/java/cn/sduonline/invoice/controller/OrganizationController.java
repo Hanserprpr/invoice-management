@@ -20,11 +20,17 @@ public class OrganizationController {
         this.organizationService = organizationService;
     }
 
+    /**
+     * 获取当前用户可访问的组织列表。
+     */
     @GetMapping
     public Result<List<OrganizationVO>> list(Authentication authentication) {
         return Result.ok(organizationService.listForUser(authentication.getName()));
     }
 
+    /**
+     * 获取指定组织的详情。
+     */
     @GetMapping("/{id}")
     public Result<OrganizationVO> get(@PathVariable String id) {
         return Result.ok(organizationService.get(id));

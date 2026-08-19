@@ -29,7 +29,7 @@
 
 使用 `scripts/backup-mysql.sh` 生成事务一致的压缩备份及 SHA-256。恢复脚本只接受以 `_restore_test` 结尾的隔离数据库，防止覆盖生产库。每次发布前备份，并至少每季度执行一次恢复演练：
 
-1. 建立空的 `invoice_management_restore_test`；
+1. 建立全新的空库 `invoice_management_restore_test`；恢复脚本会拒绝任何已有表的目标库；
 2. 执行恢复脚本，记录耗时和校验结果；
 3. 用只读账号核对 42 张业务表、Flyway 历史、关键记录数和随机业务记录；
 4. 在恢复库启动同版本应用并运行只读冒烟测试；

@@ -19,17 +19,26 @@ public class PrecheckController {
         this.service = service;
     }
 
+    /**
+     * 对指定发票执行提交前检查。
+     */
     @PostMapping
     public Result<List<PrecheckResultVO>> run(@PathVariable String invoiceId,
                                               Authentication authentication) {
         return Result.ok(service.run(invoiceId, authentication.getName()));
     }
 
+    /**
+     * 获取指定发票的预检结果。
+     */
     @GetMapping
     public Result<List<PrecheckResultVO>> list(@PathVariable String invoiceId) {
         return Result.ok(service.list(invoiceId));
     }
 
+    /**
+     * 处理指定的发票预检问题。
+     */
     @PostMapping("/{resultId}/resolve")
     public Result<PrecheckResultVO> resolve(@PathVariable String invoiceId,
                                             @PathVariable String resultId,

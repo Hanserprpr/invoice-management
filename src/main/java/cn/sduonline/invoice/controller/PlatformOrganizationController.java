@@ -20,6 +20,9 @@ public class PlatformOrganizationController {
         this.organizationService = organizationService;
     }
 
+    /**
+     * 创建组织。
+     */
     @PostMapping
     public ResponseEntity<Result<OrganizationVO>> create(Authentication authentication,
                                                          @Valid @RequestBody CreateOrganizationRequest request) {
@@ -27,6 +30,9 @@ public class PlatformOrganizationController {
                 .body(Result.ok(organizationService.create(authentication.getName(), request)));
     }
 
+    /**
+     * 更新指定组织的信息。
+     */
     @PatchMapping("/{id}")
     public Result<OrganizationVO> update(Authentication authentication,
                                          @PathVariable String id,

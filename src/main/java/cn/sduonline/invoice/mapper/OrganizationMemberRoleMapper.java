@@ -6,9 +6,16 @@ import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+
+import java.time.Instant;
 
 @Mapper
 public interface OrganizationMemberRoleMapper {
+
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("SELECT CURRENT_TIMESTAMP(3)")
+    Instant currentTimestamp();
 
     @Delete("DELETE FROM organization_member_role WHERE organization_id=#{organizationId} AND member_id=#{memberId}")
     int deleteForMember(@Param("organizationId") String organizationId,

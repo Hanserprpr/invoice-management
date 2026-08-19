@@ -23,11 +23,17 @@ public class PaperController {
         this.service = service;
     }
 
+    /**
+     * 获取指定发票的纸质票据信息。
+     */
     @GetMapping("/invoices/{invoiceId}/paper")
     public Result<PaperItemVO> detail(@PathVariable String invoiceId) {
         return Result.ok(service.detail(invoiceId));
     }
 
+    /**
+     * 分页查询指定项目的纸质票据。
+     */
     @GetMapping("/projects/{projectId}/paper-items")
     public Result<PageResult<PaperItemVO>> list(
             @PathVariable String projectId,
@@ -37,24 +43,36 @@ public class PaperController {
         return Result.ok(service.list(page, pageSize, projectId, status));
     }
 
+    /**
+     * 申报指定发票存在纸质票据。
+     */
     @PostMapping("/invoices/{invoiceId}/paper/declare")
     public Result<PaperItemVO> declare(@PathVariable String invoiceId, Authentication authentication,
                                        @Valid @RequestBody PaperVersionRequest request) {
         return Result.ok(service.declare(invoiceId, authentication.getName(), request));
     }
 
+    /**
+     * 撤销指定发票的纸质票据申报。
+     */
     @PostMapping("/invoices/{invoiceId}/paper/revoke-declaration")
     public Result<PaperItemVO> revoke(@PathVariable String invoiceId, Authentication authentication,
                                       @Valid @RequestBody PaperVersionRequest request) {
         return Result.ok(service.revokeDeclaration(invoiceId, authentication.getName(), request));
     }
 
+    /**
+     * 确认收到指定发票的纸质票据。
+     */
     @PostMapping("/invoices/{invoiceId}/paper/receive")
     public Result<PaperItemVO> receive(@PathVariable String invoiceId, Authentication authentication,
                                        @Valid @RequestBody PaperVersionRequest request) {
         return Result.ok(service.receive(invoiceId, authentication.getName(), request));
     }
 
+    /**
+     * 变更指定纸质票据的流转状态。
+     */
     @PostMapping("/invoices/{invoiceId}/paper/state")
     public Result<PaperItemVO> changeState(@PathVariable String invoiceId,
                                            Authentication authentication,
@@ -62,6 +80,9 @@ public class PaperController {
         return Result.ok(service.changeState(invoiceId, authentication.getName(), request));
     }
 
+    /**
+     * 在指定项目中扫码处理纸质票据。
+     */
     @PostMapping("/projects/{projectId}/paper/scans")
     public Result<PaperScanResultVO> scan(@PathVariable String projectId,
                                           Authentication authentication,

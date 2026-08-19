@@ -17,6 +17,9 @@ public class PlatformFileController {
         this.fileService = fileService;
     }
 
+    /**
+     * 对指定组织的文件执行平台级安全复检。
+     */
     @PostMapping("/{fileId}/inspection")
     public Result<FileObjectVO> inspect(Authentication authentication,
                                         @PathVariable String organizationId,

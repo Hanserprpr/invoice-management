@@ -18,11 +18,17 @@ public class ExternalStatusController {
     private final ExternalStatusService service;
     public ExternalStatusController(ExternalStatusService service) { this.service = service; }
 
+    /**
+     * 获取指定导出批次的外部状态事件。
+     */
     @GetMapping
     public Result<List<ExternalStatusEventVO>> list(@PathVariable String batchId) {
         return Result.ok(service.list(batchId));
     }
 
+    /**
+     * 向指定导出批次追加外部状态事件。
+     */
     @PostMapping
     public ResponseEntity<Result<ExternalStatusEventVO>> append(
             @PathVariable String batchId, Authentication authentication,
@@ -31,6 +37,9 @@ public class ExternalStatusController {
                 .body(Result.ok(service.append(batchId, authentication.getName(), request)));
     }
 
+    /**
+     * 对指定外部状态事件进行更正。
+     */
     @PostMapping("/{eventId}/corrections")
     public ResponseEntity<Result<ExternalStatusEventVO>> correct(
             @PathVariable String batchId, @PathVariable String eventId,

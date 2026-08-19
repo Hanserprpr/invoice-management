@@ -20,6 +20,9 @@ public class ExportBatchController {
 
     public ExportBatchController(ExportBatchService service) { this.service = service; }
 
+    /**
+     * 按条件分页查询导出批次。
+     */
     @GetMapping
     public Result<PageResult<ExportBatchVO>> list(
             @RequestParam(defaultValue = "1") @Min(1) long page,
@@ -29,6 +32,9 @@ public class ExportBatchController {
         return Result.ok(service.list(page, pageSize, projectId, status));
     }
 
+    /**
+     * 创建导出批次。
+     */
     @PostMapping
     public ResponseEntity<Result<ExportBatchVO>> create(Authentication authentication,
                                                         @Valid @RequestBody CreateExportBatchRequest request) {
@@ -36,11 +42,17 @@ public class ExportBatchController {
                 .body(Result.ok(service.create(authentication.getName(), request)));
     }
 
+    /**
+     * 获取指定导出批次的详情。
+     */
     @GetMapping("/{batchId}")
     public Result<ExportBatchVO> detail(@PathVariable String batchId) {
         return Result.ok(service.detail(batchId));
     }
 
+    /**
+     * 提交指定批次的导出文件生成任务。
+     */
     @PostMapping("/{batchId}/generate")
     public ResponseEntity<Result<ExportBatchVO>> generate(@PathVariable String batchId,
                                                           Authentication authentication,
@@ -49,6 +61,9 @@ public class ExportBatchController {
                 .body(Result.ok(service.generate(batchId, authentication.getName(), request)));
     }
 
+    /**
+     * 为指定导出批次创建修订版本。
+     */
     @PostMapping("/{batchId}/revisions")
     public ResponseEntity<Result<ExportBatchVO>> revise(@PathVariable String batchId,
                                                         Authentication authentication,
@@ -57,24 +72,36 @@ public class ExportBatchController {
                 .body(Result.ok(service.revise(batchId, authentication.getName(), request)));
     }
 
+    /**
+     * 取消指定导出批次。
+     */
     @PostMapping("/{batchId}/cancel")
     public Result<ExportBatchVO> cancel(@PathVariable String batchId, Authentication authentication,
                                         @Valid @RequestBody BatchVersionRequest request) {
         return Result.ok(service.cancel(batchId, authentication.getName(), request));
     }
 
+    /**
+     * 将指定导出批次标记为已完成。
+     */
     @PostMapping("/{batchId}/complete")
     public Result<ExportBatchVO> complete(@PathVariable String batchId, Authentication authentication,
                                           @Valid @RequestBody BatchVersionRequest request) {
         return Result.ok(service.complete(batchId, authentication.getName(), request));
     }
 
+    /**
+     * 归档指定导出批次。
+     */
     @PostMapping("/{batchId}/archive")
     public Result<ExportBatchVO> archive(@PathVariable String batchId, Authentication authentication,
                                          @Valid @RequestBody BatchVersionRequest request) {
         return Result.ok(service.archive(batchId, authentication.getName(), request));
     }
 
+    /**
+     * 获取指定导出产物的下载地址。
+     */
     @GetMapping("/{batchId}/artifacts/{artifactId}/download-url")
     public Result<FileDownloadVO> download(@PathVariable String batchId, @PathVariable String artifactId,
                                            Authentication authentication) {

@@ -33,6 +33,9 @@ public class ProjectController {
         this.projectService = projectService;
     }
 
+    /**
+     * 按条件分页查询项目。
+     */
     @GetMapping
     public Result<PageResult<ProjectVO>> list(
             @RequestParam(defaultValue = "1") @Min(1) long page,
@@ -41,6 +44,9 @@ public class ProjectController {
         return Result.ok(projectService.list(page, pageSize, status));
     }
 
+    /**
+     * 创建项目。
+     */
     @PostMapping
     public ResponseEntity<Result<ProjectVO>> create(Authentication authentication,
                                                      @Valid @RequestBody CreateProjectRequest request) {
@@ -48,35 +54,53 @@ public class ProjectController {
                 .body(Result.ok(projectService.create(authentication.getName(), request)));
     }
 
+    /**
+     * 获取指定项目的详情。
+     */
     @GetMapping("/{projectId}")
     public Result<ProjectVO> detail(@PathVariable String projectId) {
         return Result.ok(projectService.detail(projectId));
     }
 
+    /**
+     * 更新指定项目。
+     */
     @PatchMapping("/{projectId}")
     public Result<ProjectVO> update(@PathVariable String projectId, Authentication authentication,
                                     @Valid @RequestBody UpdateProjectRequest request) {
         return Result.ok(projectService.update(projectId, authentication.getName(), request));
     }
 
+    /**
+     * 开放指定项目的发票收集。
+     */
     @PostMapping("/{projectId}/open")
     public Result<ProjectVO> open(@PathVariable String projectId, Authentication authentication,
                                   @Valid @RequestBody ChangeStateRequest request) {
         return Result.ok(projectService.open(projectId, authentication.getName(), request));
     }
 
+    /**
+     * 停止指定项目的发票收集。
+     */
     @PostMapping("/{projectId}/stop-collection")
     public Result<ProjectVO> stopCollection(@PathVariable String projectId, Authentication authentication,
                                             @Valid @RequestBody ChangeStateRequest request) {
         return Result.ok(projectService.stopCollection(projectId, authentication.getName(), request));
     }
 
+    /**
+     * 将指定项目转入整理阶段。
+     */
     @PostMapping("/{projectId}/start-organizing")
     public Result<ProjectVO> startOrganizing(@PathVariable String projectId, Authentication authentication,
                                              @Valid @RequestBody ChangeStateRequest request) {
         return Result.ok(projectService.startOrganizing(projectId, authentication.getName(), request));
     }
 
+    /**
+     * 归档指定项目。
+     */
     @PostMapping("/{projectId}/archive")
     public Result<ProjectVO> archive(@PathVariable String projectId, Authentication authentication,
                                      @Valid @RequestBody ChangeStateRequest request) {

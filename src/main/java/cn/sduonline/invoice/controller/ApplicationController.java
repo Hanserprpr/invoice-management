@@ -36,16 +36,25 @@ public class ApplicationController {
         this.applicationService = applicationService;
     }
 
+    /**
+     * 获取当前用户可申报的表单列表。
+     */
     @GetMapping("/application-forms")
     public Result<List<AvailableFormVO>> availableForms() {
         return Result.ok(applicationService.availableForms());
     }
 
+    /**
+     * 获取指定可申报表单的详情。
+     */
     @GetMapping("/application-forms/{formId}")
     public Result<AvailableFormVO> availableForm(@PathVariable String formId) {
         return Result.ok(applicationService.availableForm(formId));
     }
 
+    /**
+     * 根据指定表单创建申报草稿。
+     */
     @PostMapping("/application-forms/{formId}/applications")
     public ResponseEntity<Result<ApplicationVO>> createDraft(
             @PathVariable String formId, Authentication authentication) {
@@ -53,6 +62,9 @@ public class ApplicationController {
                 .body(Result.ok(applicationService.createDraft(formId, authentication.getName())));
     }
 
+    /**
+     * 分页查询当前用户的申报记录。
+     */
     @GetMapping("/applications")
     public Result<PageResult<ApplicationVO>> listMine(
             @RequestParam(defaultValue = "1") @Min(1) long page,
@@ -61,11 +73,17 @@ public class ApplicationController {
         return Result.ok(applicationService.listMine(page, pageSize, status));
     }
 
+    /**
+     * 获取指定申报的详情。
+     */
     @GetMapping("/applications/{applicationId}")
     public Result<ApplicationVO> detail(@PathVariable String applicationId) {
         return Result.ok(applicationService.detail(applicationId));
     }
 
+    /**
+     * 保存指定申报的草稿内容。
+     */
     @PatchMapping("/applications/{applicationId}")
     public Result<ApplicationVO> saveDraft(
             @PathVariable String applicationId, Authentication authentication,
@@ -74,6 +92,9 @@ public class ApplicationController {
                 applicationId, authentication.getName(), request));
     }
 
+    /**
+     * 提交指定申报。
+     */
     @PostMapping("/applications/{applicationId}/submit")
     public Result<ApplicationVO> submit(
             @PathVariable String applicationId, Authentication authentication,
@@ -81,6 +102,9 @@ public class ApplicationController {
         return Result.ok(applicationService.submit(applicationId, authentication.getName(), request));
     }
 
+    /**
+     * 获取指定申报的修订历史。
+     */
     @GetMapping("/applications/{applicationId}/revisions")
     public Result<List<ApplicationRevisionVO>> revisions(@PathVariable String applicationId) {
         return Result.ok(applicationService.revisions(applicationId));

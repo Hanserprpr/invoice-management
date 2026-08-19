@@ -16,6 +16,9 @@ public class AuditLogController {
     private final AuditQueryService service;
     public AuditLogController(AuditQueryService service) { this.service = service; }
 
+    /**
+     * 按条件分页查询审计日志。
+     */
     @GetMapping
     public Result<PageResult<AuditLogVO>> list(
             @RequestParam(defaultValue = "1") @Min(1) long page,

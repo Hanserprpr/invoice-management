@@ -22,6 +22,9 @@ public class RecognitionController {
         this.recognitionService = recognitionService;
     }
 
+    /**
+     * 启动指定发票的智能识别任务。
+     */
     @PostMapping
     public ResponseEntity<Result<RecognitionJobVO>> start(
             @PathVariable String invoiceId, Authentication authentication) {
@@ -29,16 +32,25 @@ public class RecognitionController {
                 .body(Result.ok(recognitionService.start(invoiceId, authentication.getName())));
     }
 
+    /**
+     * 获取指定发票的识别任务记录。
+     */
     @GetMapping("/jobs")
     public Result<List<RecognitionJobVO>> jobs(@PathVariable String invoiceId) {
         return Result.ok(recognitionService.jobs(invoiceId));
     }
 
+    /**
+     * 获取指定发票的识别建议。
+     */
     @GetMapping("/suggestions")
     public Result<List<RecognitionSuggestionVO>> suggestions(@PathVariable String invoiceId) {
         return Result.ok(recognitionService.suggestions(invoiceId));
     }
 
+    /**
+     * 确认或修正指定发票的识别建议。
+     */
     @PutMapping("/suggestions")
     public Result<List<RecognitionSuggestionVO>> confirm(
             @PathVariable String invoiceId, Authentication authentication,

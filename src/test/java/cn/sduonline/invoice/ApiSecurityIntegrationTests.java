@@ -66,6 +66,17 @@ class ApiSecurityIntegrationTests {
     }
 
     @Test
+    void frameworkRoutingErrorsUseStableBusinessCodes() throws Exception {
+        mockMvc.perform(get("/auth/does-not-exist").with(user("routing-test")))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(10003));
+
+        mockMvc.perform(post("/auth/login-url").with(csrf()))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value(10002));
+    }
+
+    @Test
     @Transactional
     void organizationListIsUserScopedAndTenantPathMustMatchHeader() throws Exception {
         jdbcTemplate.update("INSERT INTO `user`(cas_id,name,status,is_platform_admin) VALUES ('api-user','接口用户','ACTIVE',FALSE)");

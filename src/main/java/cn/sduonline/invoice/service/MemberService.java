@@ -30,7 +30,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
@@ -103,7 +102,7 @@ public class MemberService {
         Role memberRole = roleMapper.findByCode("MEMBER");
         memberRoleMapper.insert(OrganizationMemberRole.builder()
                 .memberId(member.getId()).organizationId(organizationId)
-                .roleId(memberRole.getId()).effectiveFrom(databaseNow())
+                .roleId(memberRole.getId()).effectiveFrom(memberRoleMapper.currentTimestamp())
                 .assignedByCasId(actorCasId).build());
         auditService.append(organizationId, actorCasId, "MEMBER_CREATED",
                 "ORGANIZATION_MEMBER", member.getId(), "{\"casId\":\"" + request.casId() + "\"}");
@@ -145,7 +144,8 @@ public class MemberService {
         authorizationService.requireTenantPath(organizationId);
         authorizationService.requirePermission("role:manage");
         OrganizationMember member = requireMember(organizationId, casId);
-        List<RoleBinding> roles = validateRoles(request.roles());
+        Instant currentTimestamp = memberRoleMapper.currentTimestamp();
+        List<RoleBinding> roles = validateRoles(request.roles(), currentTimestamp);
         List<ProjectAccess> grants = validateGrants(organizationId, member.getId(), actorCasId,
                 request.projectGrants());
         if (memberMapper.bumpVersion(organizationId, casId, request.version()) != 1) {
@@ -167,13 +167,14 @@ public class MemberService {
         return toVO(member);
     }
 
-    private List<RoleBinding> validateRoles(List<RoleAssignment> assignments) {
+    private List<RoleBinding> validateRoles(List<RoleAssignment> assignments, Instant currentTimestamp) {
         Set<String> duplicateGuard = new HashSet<>();
         return assignments.stream().map(assignment -> {
             if (!ALLOWED_ROLES.contains(assignment.code()) || !duplicateGuard.add(assignment.code())) {
                 throw new BusinessException(BizCode.ROLE_NOT_FOUND, HttpStatus.BAD_REQUEST);
             }
-            Instant from = assignment.effectiveFrom() == null ? databaseNow() : assignment.effectiveFrom();
+            Instant from = assignment.effectiveFrom() == null
+                    ? currentTimestamp : assignment.effectiveFrom();
             if (assignment.effectiveUntil() != null && assignment.effectiveUntil().isBefore(from)) {
                 throw new BusinessException(BizCode.MEMBER_TERM_INVALID, HttpStatus.BAD_REQUEST);
             }
@@ -222,10 +223,6 @@ public class MemberService {
         if (start != null && end != null && end.isBefore(start)) {
             throw new BusinessException(BizCode.MEMBER_TERM_INVALID, HttpStatus.BAD_REQUEST);
         }
-    }
-
-    private Instant databaseNow() {
-        return Instant.now().truncatedTo(ChronoUnit.MILLIS);
     }
 
     private record RoleBinding(Role role, Instant from, Instant until) {
