@@ -19,6 +19,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.UnexpectedRollbackException;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
@@ -55,6 +56,15 @@ public class IdempotencyFilter extends OncePerRequestFilter {
                 || properties.getMaxRequestBytes() >= Integer.MAX_VALUE) {
             throw new IllegalArgumentException("app.idempotency.max-request-bytes is out of range");
         }
+        long timeoutSeconds = properties.getRequestTimeout().toSeconds();
+        if (timeoutSeconds < 1 || timeoutSeconds > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("app.idempotency.request-timeout is out of range");
+        }
+        if (timeoutSeconds >= properties.getProcessingTtl().toSeconds()) {
+            throw new IllegalArgumentException(
+                    "app.idempotency.request-timeout must be shorter than processing-ttl");
+        }
+        this.transactionTemplate.setTimeout((int) timeoutSeconds);
         this.maxRequestBytes = properties.getMaxRequestBytes();
     }
 
@@ -111,35 +121,53 @@ public class IdempotencyFilter extends OncePerRequestFilter {
 
         String claimId = ((Acquired) outcome).recordId();
         ContentCachingResponseWrapper cachedResponse = new ContentCachingResponseWrapper(response);
-        boolean transactionCompleted = false;
+        boolean emitBufferedResponse = false;
+        boolean claimSettled = false;
         try {
-            transactionTemplate.executeWithoutResult(ignored -> executeDownstream(
-                    filterChain, cachedRequest, cachedResponse, claimId));
-            transactionCompleted = true;
+            claimSettled = Boolean.TRUE.equals(transactionTemplate.execute(ignored ->
+                    executeDownstream(filterChain, cachedRequest, cachedResponse, claimId)));
+            emitBufferedResponse = true;
         } catch (DownstreamException exception) {
+            claimSettled = true;
             release(claimId, exception);
             if (exception.getCause() instanceof IOException ioException) throw ioException;
             if (exception.getCause() instanceof ServletException servletException) {
                 throw servletException;
             }
             throw exception;
+        } catch (UnexpectedRollbackException exception) {
+            // 业务层 @Transactional 参与者抛出异常后会把外层事务标记为 rollback-only，
+            // 直到这里提交时才暴露。此时下游已经写好了对应的错误响应，业务写入也已整体
+            // 回滚，应当把这个真实响应发出去，而不是让容器用 500 覆盖它。
+            claimSettled = true;
+            release(claimId, exception);
+            if (cachedResponse.getStatus() < HttpStatus.BAD_REQUEST.value()) throw exception;
+            emitBufferedResponse = true;
         } catch (RuntimeException exception) {
+            claimSettled = true;
             release(claimId, exception);
             throw exception;
         } finally {
-            if (transactionCompleted) {
+            if (!claimSettled) release(claimId, null);
+            if (emitBufferedResponse) {
                 cachedResponse.copyBodyToResponse();
             }
         }
     }
 
-    private void executeDownstream(FilterChain filterChain, CachedBodyRequest request,
-                                   ContentCachingResponseWrapper response, String claimId) {
+    private boolean executeDownstream(FilterChain filterChain, CachedBodyRequest request,
+                                      ContentCachingResponseWrapper response, String claimId) {
         try {
             filterChain.doFilter(request, response);
+            if (response.getStatus() >= HttpStatus.BAD_REQUEST.value()) {
+                // 失败响应不做记忆：客户端拿同一把幂等键重试时必须真正重新执行，
+                // 而不是收到缓存下来的 4xx/5xx。占位记录由调用方释放。
+                return false;
+            }
             byte[] body = response.getContentAsByteArray();
             service.complete(claimId, response.getStatus(),
                     new String(body, responseCharset(response)));
+            return true;
         } catch (IOException | ServletException exception) {
             throw new DownstreamException(exception);
         }
@@ -149,7 +177,11 @@ public class IdempotencyFilter extends OncePerRequestFilter {
         try {
             service.release(claimId);
         } catch (RuntimeException releaseException) {
-            original.addSuppressed(releaseException);
+            if (original == null) {
+                logger.warn("释放幂等占位记录失败: " + claimId, releaseException);
+            } else {
+                original.addSuppressed(releaseException);
+            }
         }
     }
 

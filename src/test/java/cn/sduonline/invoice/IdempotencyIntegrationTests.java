@@ -1,5 +1,7 @@
 package cn.sduonline.invoice;
 
+import cn.sduonline.invoice.data.enums.BizCode;
+import cn.sduonline.invoice.exception.BusinessException;
 import cn.sduonline.invoice.service.IdempotencyService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +20,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
@@ -46,6 +49,7 @@ class IdempotencyIntegrationTests {
     private static final String MEMBER_ID = "01KAP000000000000000000199";
     private static final String ACTOR = "idem-user";
     private static final String OTHER_ACTOR = "idem-other";
+    private static final String ROLLBACK_PROBE = "idem-probe";
 
     @Autowired MockMvc mockMvc;
     @Autowired JdbcTemplate jdbcTemplate;
@@ -58,7 +62,8 @@ class IdempotencyIntegrationTests {
         jdbcTemplate.update("DELETE FROM idempotency_record WHERE cas_id IN (?,?)", ACTOR, OTHER_ACTOR);
         jdbcTemplate.update("DELETE FROM organization_member WHERE id=?", MEMBER_ID);
         jdbcTemplate.update("DELETE FROM organization WHERE id=?", ORGANIZATION_ID);
-        jdbcTemplate.update("DELETE FROM `user` WHERE cas_id IN (?,?)", ACTOR, OTHER_ACTOR);
+        jdbcTemplate.update("DELETE FROM `user` WHERE cas_id IN (?,?,?)", ACTOR, OTHER_ACTOR,
+                ROLLBACK_PROBE);
         jdbcTemplate.update("""
                 INSERT INTO `user`(cas_id,name,status,is_platform_admin)
                 VALUES (?,?,'ACTIVE',TRUE),(?,?,'ACTIVE',TRUE)
@@ -164,25 +169,40 @@ class IdempotencyIntegrationTests {
     }
 
     @Test
-    void handledServerErrorIsReplayedBecauseItsResponseIsKnown() throws Exception {
-        MvcResult first = organizationPost(
-                "failure-key", "/api/idempotency-test/failure", "{\"value\":\"retry\"}", ACTOR)
-                .andExpect(status().isInternalServerError())
-                .andReturn();
-        MvcResult replay = organizationPost(
-                "failure-key", "/api/idempotency-test/failure", "{\"value\":\"retry\"}", ACTOR)
-                .andExpect(status().isInternalServerError())
-                .andReturn();
+    void handledServerErrorIsNotMemoizedSoTheClientCanRetry() throws Exception {
+        organizationPost("failure-key", "/api/idempotency-test/failure", "{\"value\":\"retry\"}", ACTOR)
+                .andExpect(status().isInternalServerError());
+        assertThat(claimCount("failure-key")).isZero();
 
-        assertThat(replay.getResponse().getContentAsByteArray())
-                .isEqualTo(first.getResponse().getContentAsByteArray());
-        assertThat(endpoint.failureExecutions()).isOne();
-        assertThat(jdbcTemplate.queryForMap("""
-                SELECT status,response_status FROM idempotency_record
-                WHERE cas_id=? AND idempotency_key='failure-key'
-                """, ACTOR))
-                .containsEntry("status", "COMPLETED")
-                .containsEntry("response_status", 500);
+        organizationPost("failure-key", "/api/idempotency-test/failure", "{\"value\":\"retry\"}", ACTOR)
+                .andExpect(status().isInternalServerError());
+
+        assertThat(endpoint.failureExecutions()).isEqualTo(2);
+        assertThat(claimCount("failure-key")).isZero();
+    }
+
+    @Test
+    void transactionalBusinessErrorKeepsItsStatusAndRollsBackTheWrite() throws Exception {
+        organizationPost("business-key", "/api/idempotency-test/business-failure",
+                "{\"value\":\"conflict\"}", ACTOR)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(BizCode.VERSION_CONFLICT.getCode()));
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM `user` WHERE cas_id=?", Integer.class, ROLLBACK_PROBE))
+                .isZero();
+        assertThat(claimCount("business-key")).isZero();
+
+        organizationPost("business-key", "/api/idempotency-test/business-failure",
+                "{\"value\":\"conflict\"}", ACTOR)
+                .andExpect(status().isConflict());
+        assertThat(endpoint.businessFailureExecutions()).isEqualTo(2);
+    }
+
+    private int claimCount(String key) {
+        return jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM idempotency_record WHERE cas_id=? AND idempotency_key=?
+                """, Integer.class, ACTOR, key);
     }
 
     @Test
@@ -250,8 +270,34 @@ class IdempotencyIntegrationTests {
     @TestConfiguration(proxyBeanMethods = false)
     static class EndpointConfiguration {
         @Bean
-        CountingEndpoint countingEndpoint() {
-            return new CountingEndpoint();
+        TransactionalFailingWriter transactionalFailingWriter(JdbcTemplate jdbcTemplate) {
+            return new TransactionalFailingWriter(jdbcTemplate);
+        }
+
+        @Bean
+        CountingEndpoint countingEndpoint(TransactionalFailingWriter writer) {
+            return new CountingEndpoint(writer);
+        }
+    }
+
+    /**
+     * 复刻真实业务服务的形状：一个 @Transactional 方法先写库再抛 BusinessException。
+     * 它会把过滤器开启的外层事务标记为 rollback-only。
+     */
+    static class TransactionalFailingWriter {
+        private final JdbcTemplate jdbcTemplate;
+
+        TransactionalFailingWriter(JdbcTemplate jdbcTemplate) {
+            this.jdbcTemplate = jdbcTemplate;
+        }
+
+        @Transactional
+        public void writeThenReject() {
+            jdbcTemplate.update("""
+                    INSERT INTO `user`(cas_id,name,status,is_platform_admin)
+                    VALUES (?,?,'ACTIVE',FALSE)
+                    """, ROLLBACK_PROBE, "幂等回滚探针");
+            throw new BusinessException(BizCode.VERSION_CONFLICT, HttpStatus.CONFLICT);
         }
     }
 
@@ -260,6 +306,12 @@ class IdempotencyIntegrationTests {
         private final AtomicInteger organizationExecutions = new AtomicInteger();
         private final AtomicInteger globalExecutions = new AtomicInteger();
         private final AtomicInteger failureExecutions = new AtomicInteger();
+        private final AtomicInteger businessFailureExecutions = new AtomicInteger();
+        private final TransactionalFailingWriter writer;
+
+        CountingEndpoint(TransactionalFailingWriter writer) {
+            this.writer = writer;
+        }
 
         @PostMapping({"/api/idempotency-test", "/api/idempotency-test/other"})
         ResponseEntity<Map<String, Object>> organization(@RequestBody Map<String, Object> body) {
@@ -275,6 +327,13 @@ class IdempotencyIntegrationTests {
         ResponseEntity<Void> fail() {
             failureExecutions.incrementAndGet();
             throw new IllegalStateException("test failure");
+        }
+
+        @PostMapping("/api/idempotency-test/business-failure")
+        ResponseEntity<Void> businessFailure() {
+            businessFailureExecutions.incrementAndGet();
+            writer.writeThenReject();
+            return ResponseEntity.noContent().build();
         }
 
         private ResponseEntity<Map<String, Object>> organizationResponse(Map<String, Object> body) {
@@ -294,6 +353,7 @@ class IdempotencyIntegrationTests {
             organizationExecutions.set(0);
             globalExecutions.set(0);
             failureExecutions.set(0);
+            businessFailureExecutions.set(0);
         }
 
         int organizationExecutions() {
@@ -302,6 +362,10 @@ class IdempotencyIntegrationTests {
 
         int failureExecutions() {
             return failureExecutions.get();
+        }
+
+        int businessFailureExecutions() {
+            return businessFailureExecutions.get();
         }
     }
 }

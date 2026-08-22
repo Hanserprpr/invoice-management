@@ -371,6 +371,18 @@ class ReviewWorkflowIntegrationTests {
             var finalBatch = exportBatchService.create(reviewer,
                     new CreateExportBatchRequest("REVIEW-FINAL", List.of(invoiceOne, invoiceTwo)));
             finalBatchId = finalBatch.id();
+        }
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), admin)) {
+            // 草稿批次尚未产出任何材料，不应存在“平台外状态”事件
+            assertThatThrownBy(() -> externalStatusService.append(finalBatchId, admin,
+                    new CreateExternalEventRequest("STATUS_CHANGE", "CANCELLED",
+                            "草稿批次不能走平台外流程", List.of(), 0L)))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            exception -> assertThat(exception.getBizCode())
+                                    .isEqualTo(BizCode.EXPORT_BATCH_STATE_NOT_ALLOWED));
+            assertThat(exportBatchService.detail(finalBatchId).status()).isEqualTo("DRAFT");
+        }
+        try (TenantContext.Scope ignored = TenantContext.open(organization.id(), reviewer)) {
             exportBatchService.generate(finalBatchId, reviewer, new BatchVersionRequest(0L));
             assertThat(exportWorker.processNext()).isTrue();
             ExportBatchVO finalGenerated = exportBatchService.detail(finalBatchId);

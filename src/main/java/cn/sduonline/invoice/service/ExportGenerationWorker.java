@@ -35,6 +35,8 @@ import java.util.zip.ZipOutputStream;
 @Service
 public class ExportGenerationWorker {
     private static final String JOB_TYPE = "EXPORT_GENERATION";
+    private static final List<String> ARTIFACT_FILE_NAMES = List.of(
+            "invoice-ledger.xlsx", "invoice-list.pdf", "attachments.zip", "manifest.json");
 
     private final AsyncJobClaimService claimService;
     private final ExportBatchMapper batchMapper;
@@ -96,6 +98,7 @@ public class ExportGenerationWorker {
         }
         List<ExportBatchInvoice> items = itemMapper.findForBatch(job.getOrganizationId(), batch.getId());
         if (items.isEmpty()) throw new IllegalStateException("导出批次没有发票");
+        discardAbandonedAttempts(job);
         Path directory = Files.createTempDirectory("invoice-export-");
         List<ExportArtifactPersistenceService.GeneratedArtifact> generated = new ArrayList<>();
         List<String> uploadedKeys = new ArrayList<>();
@@ -135,8 +138,7 @@ public class ExportGenerationWorker {
             throws IOException {
         String fileId = UlidGenerator.next();
         String fileName = source.getFileName().toString();
-        String key = job.getOrganizationId() + "/exports/" + job.getTargetId() + "/"
-                + job.getId() + "/attempt-" + job.getLeaseVersion() + "/" + fileName;
+        String key = attemptPrefix(job, job.getLeaseVersion()) + fileName;
         String hash = sha256(source);
         storage.uploadFrom(key, source, contentType, hash);
         uploadedKeys.add(key);
@@ -232,6 +234,30 @@ public class ExportGenerationWorker {
                 "formatVersion", 1, "batchId", batch.getId(), "batchNo", batch.getBatchNo(),
                 "revisionNo", batch.getRevisionNo(), "generatedAt", Instant.now().toString(),
                 "files", files)), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * 删除此前尝试上传但未落库的产物。调用点位于批次仍为 DRAFT 时，
+     * 说明历史尝试都没有走到 persist（persist 会把批次置为 GENERATED），
+     * 因此这些对象一定没有被 export_artifact 引用，可以安全删除。
+     */
+    private void discardAbandonedAttempts(AsyncJob job) {
+        long current = job.getLeaseVersion() == null ? 0 : job.getLeaseVersion();
+        for (long attempt = 1; attempt < current; attempt++) {
+            String prefix = attemptPrefix(job, attempt);
+            for (String fileName : ARTIFACT_FILE_NAMES) {
+                try {
+                    storage.delete(prefix + fileName);
+                } catch (RuntimeException ignored) {
+                    // 清理是尽力而为，删不掉不应阻断本次生成
+                }
+            }
+        }
+    }
+
+    private String attemptPrefix(AsyncJob job, Long leaseVersion) {
+        return job.getOrganizationId() + "/exports/" + job.getTargetId() + "/"
+                + job.getId() + "/attempt-" + leaseVersion + "/";
     }
 
     private String sha256(Path file) throws IOException {

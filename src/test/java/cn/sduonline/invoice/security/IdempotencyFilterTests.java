@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.UnexpectedRollbackException;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.security.Principal;
@@ -90,6 +91,35 @@ class IdempotencyFilterTests {
 
         org.assertj.core.api.Assertions.assertThat(response.getContentAsByteArray()).isEmpty();
         verify(service).release("claim-id");
+    }
+
+    @Test
+    void rollbackOnlyBusinessErrorStillDeliversItsOwnResponse() throws Exception {
+        IdempotencyService service = mock(IdempotencyService.class);
+        SecurityErrorWriter errorWriter = mock(SecurityErrorWriter.class);
+        when(service.claim(any())).thenReturn(new Acquired("claim-id"));
+        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        doThrow(new UnexpectedRollbackException("marked rollback-only"))
+                .when(transactionManager).commit(any());
+        IdempotencyFilter filter = filter(service, errorWriter, transactionManager, 1024);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/test");
+        request.addHeader("Idempotency-Key", "rollback-key");
+        request.setContent("{}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        request.setUserPrincipal((Principal) () -> "rollback-user");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, (req, res) -> {
+            ((jakarta.servlet.http.HttpServletResponse) res).setStatus(409);
+            res.setContentType("application/json");
+            res.getWriter().write("{\"code\":40900}");
+        });
+
+        org.assertj.core.api.Assertions.assertThat(response.getStatus()).isEqualTo(409);
+        org.assertj.core.api.Assertions.assertThat(response.getContentAsString())
+                .isEqualTo("{\"code\":40900}");
+        verify(service).release("claim-id");
+        verify(service, never()).complete(any(), org.mockito.ArgumentMatchers.anyInt(), any());
     }
 
     private IdempotencyFilter filter(IdempotencyService service, SecurityErrorWriter errorWriter,

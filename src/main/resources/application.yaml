@@ -42,7 +42,8 @@ management:
 app:
   idempotency:
     ttl: ${IDEMPOTENCY_TTL:5m}
-    processing-ttl: ${IDEMPOTENCY_PROCESSING_TTL:1h}
+    processing-ttl: ${IDEMPOTENCY_PROCESSING_TTL:5m}
+    request-timeout: ${IDEMPOTENCY_REQUEST_TIMEOUT:60s}
     cleanup-interval: ${IDEMPOTENCY_CLEANUP_INTERVAL:1h}
     cleanup-batch-size: ${IDEMPOTENCY_CLEANUP_BATCH_SIZE:1000}
     max-request-bytes: ${IDEMPOTENCY_MAX_REQUEST_BYTES:2097152}
