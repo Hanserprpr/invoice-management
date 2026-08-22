@@ -62,7 +62,7 @@ public class ExternalStatusService {
                 && !Set.of("GENERATED", "EXPORTED", "EXTERNAL_PROCESSING", "COMPLETED")
                 .contains(batch.getStatus())) state();
         return persist(batch, actorCasId, request.eventType(), request.status(), null,
-                clean(request.comment()), request.attachmentFileIds());
+                clean(request.comment()), request.attachmentFileIds(), true);
     }
 
     @Transactional
@@ -77,7 +77,8 @@ public class ExternalStatusService {
             throw new BusinessException(BizCode.EXTERNAL_STATUS_CORRECTION_INVALID, HttpStatus.CONFLICT);
         }
         return persist(batch, actorCasId, "CORRECTION", request.status(), eventId,
-                request.reason().trim(), request.attachmentFileIds());
+                request.reason().trim(), request.attachmentFileIds(),
+                !"ARCHIVED".equals(batch.getStatus()));
     }
 
     private ExportBatch prepare(String batchId, long version) {
@@ -89,7 +90,7 @@ public class ExternalStatusService {
 
     private ExternalStatusEventVO persist(ExportBatch batch, String actorCasId, String eventType,
                                           String status, String correctionOf, String comment,
-                                          List<String> fileIds) {
+                                          List<String> fileIds, boolean applyState) {
         Set<String> attachments = fileIds == null ? Set.of() : new LinkedHashSet<>(fileIds);
         if (fileIds != null && attachments.size() != fileIds.size()) invalid();
         for (String fileId : attachments) {
@@ -106,8 +107,8 @@ public class ExternalStatusService {
                     .organizationId(batch.getOrganizationId()).fileId(fileId).build());
             fileService.markReferenced(fileId);
         }
-        if (!"COMMENT".equals(eventType)) applyBatchState(batch, status);
-        if (!"COMMENT".equals(eventType) && "RETURNED_EXTERNAL".equals(status)) {
+        if (applyState && !"COMMENT".equals(eventType)) applyBatchState(batch, status);
+        if (applyState && !"COMMENT".equals(eventType) && "RETURNED_EXTERNAL".equals(status)) {
             notificationService.createDeduplicated(batch.getOrganizationId(),
                     batch.getCreatedByCasId(), "EXTERNAL_BATCH_RETURNED", "导出批次被退回",
                     "批次 " + batch.getBatchNo() + " 已在平台外退回，请及时处理。",

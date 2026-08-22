@@ -76,6 +76,12 @@ class DatabaseMigrationIntegrationTests {
                   AND column_name='active_slot'
                 """, String.class)).isEqualTo("STORED GENERATED");
         assertThat(jdbcTemplate.queryForObject("""
+                SELECT CONCAT(data_type, ':', column_default, ':', is_nullable)
+                FROM information_schema.columns
+                WHERE table_schema=DATABASE() AND table_name='async_job'
+                  AND column_name='lease_version'
+                """, String.class)).isEqualTo("bigint:0:NO");
+        assertThat(jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM information_schema.statistics
                 WHERE table_schema=DATABASE() AND table_name='async_job'
                   AND index_name='uk_async_job_active_target' AND non_unique=0
@@ -126,6 +132,55 @@ class DatabaseMigrationIntegrationTests {
             jdbcTemplate.update("DELETE FROM async_job WHERE organization_id=?", organizationId);
             jdbcTemplate.update("DELETE FROM organization WHERE id=?", organizationId);
             jdbcTemplate.update("DELETE FROM `user` WHERE cas_id='active-job-user'");
+        }
+    }
+
+    @Test
+    void beforeMigrateCallbackTerminatesHistoricalDuplicateActiveJobs() {
+        String organizationId = "01KACTIVEJOB00000000000021";
+        jdbcTemplate.update("INSERT INTO `user`(cas_id,name,status,is_platform_admin) VALUES ('migration-job-user','Migration Job','ACTIVE',FALSE)");
+        jdbcTemplate.update("INSERT INTO organization(id,name,type,status) VALUES (?,?,?,?)",
+                organizationId, "Migration job organization", "CLUB", "ACTIVE");
+        boolean temporaryIndexAdded = false;
+        boolean uniqueIndexDropped = false;
+        try {
+            jdbcTemplate.execute("ALTER TABLE async_job ADD INDEX idx_async_job_org_migration_test (organization_id)");
+            temporaryIndexAdded = true;
+            jdbcTemplate.execute("ALTER TABLE async_job DROP INDEX uk_async_job_active_target");
+            uniqueIndexDropped = true;
+            jdbcTemplate.update("""
+                    INSERT INTO async_job(id,organization_id,job_type,target_type,target_id,status,
+                      progress,attempt_count,max_attempts,created_by_cas_id)
+                    VALUES ('01KACTIVEJOB00000000000022',?,'MIGRATION_DUPLICATE','TEST',
+                              'same-target','PENDING',0,0,3,'migration-job-user'),
+                           ('01KACTIVEJOB00000000000023',?,'MIGRATION_DUPLICATE','TEST',
+                              'same-target','RUNNING',1,1,3,'migration-job-user')
+                    """, organizationId, organizationId);
+
+            assertThat(flyway.migrate().migrationsExecuted).isZero();
+
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM async_job WHERE organization_id=?
+                      AND job_type='MIGRATION_DUPLICATE' AND status IN ('PENDING','RUNNING')
+                    """, Integer.class, organizationId)).isOne();
+            assertThat(jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*) FROM async_job WHERE organization_id=?
+                      AND job_type='MIGRATION_DUPLICATE' AND status='FAILED'
+                      AND error_code='DUPLICATE_ACTIVE_JOB_MIGRATED'
+                    """, Integer.class, organizationId)).isOne();
+        } finally {
+            jdbcTemplate.update("DELETE FROM async_job WHERE organization_id=?", organizationId);
+            if (uniqueIndexDropped) {
+                jdbcTemplate.execute("""
+                        ALTER TABLE async_job ADD CONSTRAINT uk_async_job_active_target
+                          UNIQUE (organization_id,job_type,target_type,target_id,active_slot)
+                        """);
+            }
+            if (temporaryIndexAdded) {
+                jdbcTemplate.execute("ALTER TABLE async_job DROP INDEX idx_async_job_org_migration_test");
+            }
+            jdbcTemplate.update("DELETE FROM organization WHERE id=?", organizationId);
+            jdbcTemplate.update("DELETE FROM `user` WHERE cas_id='migration-job-user'");
         }
     }
 

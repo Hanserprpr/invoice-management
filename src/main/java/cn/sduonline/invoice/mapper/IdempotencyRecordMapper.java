@@ -37,12 +37,14 @@ public interface IdempotencyRecordMapper {
     @InterceptorIgnore(tenantLine = "true")
     @Update("""
             UPDATE idempotency_record
-            SET response_status=#{responseStatus},response_body=#{responseBody},status='COMPLETED'
+            SET response_status=#{responseStatus},response_body=#{responseBody},status='COMPLETED',
+              expires_at=#{expiresAt}
             WHERE id=#{id} AND status='PROCESSING'
             """)
     int complete(@Param("id") String id,
                  @Param("responseStatus") int responseStatus,
-                 @Param("responseBody") String responseBody);
+                 @Param("responseBody") String responseBody,
+                 @Param("expiresAt") Instant expiresAt);
 
     @InterceptorIgnore(tenantLine = "true")
     @Delete("DELETE FROM idempotency_record WHERE id=#{id} AND status='PROCESSING'")

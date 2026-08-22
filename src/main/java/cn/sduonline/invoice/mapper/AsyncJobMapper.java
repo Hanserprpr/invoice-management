@@ -26,6 +26,7 @@ public interface AsyncJobMapper extends BaseMapper<AsyncJob> {
     @Update("""
             UPDATE async_job SET status='RUNNING',progress=1,
               attempt_count=attempt_count+1,started_at=CURRENT_TIMESTAMP(3),
+              lease_version=lease_version+1,
               finished_at=NULL,next_attempt_at=NULL,error_code=NULL,error_message=NULL
             WHERE id=#{id} AND status='PENDING'
             """)
@@ -36,17 +37,19 @@ public interface AsyncJobMapper extends BaseMapper<AsyncJob> {
             UPDATE async_job SET status='SUCCEEDED',progress=100,result_json=#{resultJson},
               error_code=NULL,error_message=NULL,next_attempt_at=NULL,
               finished_at=CURRENT_TIMESTAMP(3)
-            WHERE id=#{id} AND status='RUNNING'
+            WHERE id=#{id} AND status='RUNNING' AND lease_version=#{leaseVersion}
             """)
-    int succeed(@Param("id") String id, @Param("resultJson") String resultJson);
+    int succeed(@Param("id") String id, @Param("leaseVersion") long leaseVersion,
+                @Param("resultJson") String resultJson);
 
     @InterceptorIgnore(tenantLine = "true")
     @Update("""
             UPDATE async_job SET status='PENDING',progress=0,error_code=#{errorCode},
               error_message=#{errorMessage},next_attempt_at=#{nextAttemptAt}
-            WHERE id=#{id} AND status='RUNNING'
+            WHERE id=#{id} AND status='RUNNING' AND lease_version=#{leaseVersion}
             """)
-    int retry(@Param("id") String id, @Param("errorCode") String errorCode,
+    int retry(@Param("id") String id, @Param("leaseVersion") long leaseVersion,
+              @Param("errorCode") String errorCode,
               @Param("errorMessage") String errorMessage,
               @Param("nextAttemptAt") Instant nextAttemptAt);
 
@@ -55,9 +58,10 @@ public interface AsyncJobMapper extends BaseMapper<AsyncJob> {
             UPDATE async_job SET status='FAILED',progress=100,error_code=#{errorCode},
               error_message=#{errorMessage},next_attempt_at=NULL,
               finished_at=CURRENT_TIMESTAMP(3)
-            WHERE id=#{id} AND status='RUNNING'
+            WHERE id=#{id} AND status='RUNNING' AND lease_version=#{leaseVersion}
             """)
-    int fail(@Param("id") String id, @Param("errorCode") String errorCode,
+    int fail(@Param("id") String id, @Param("leaseVersion") long leaseVersion,
+             @Param("errorCode") String errorCode,
              @Param("errorMessage") String errorMessage);
 
     @InterceptorIgnore(tenantLine = "true")

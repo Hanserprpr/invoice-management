@@ -52,9 +52,10 @@ public class FileSecurityScanWorker {
                 job.getOrganizationId(), job.getCreatedByCasId())) {
             process(job);
         } catch (Exception exception) {
-            boolean retrying = claimService.retryOrFail(job, errorCode(exception),
+            AsyncJobClaimService.FailureOutcome outcome = claimService.retryOrFail(
+                    job, errorCode(exception),
                     safeMessage(exception));
-            if (!retrying) {
+            if (outcome == AsyncJobClaimService.FailureOutcome.FAILED) {
                 fileMapper.updateSecurityScanResult(job.getOrganizationId(), job.getTargetId(),
                         "FAILED", null, Instant.now().plusSeconds(86_400));
             }
@@ -65,9 +66,10 @@ public class FileSecurityScanWorker {
     private void recoverStaleJobs() {
         for (AsyncJob stale : claimService.findStale(
                 JOB_TYPE, Instant.now().minus(15, ChronoUnit.MINUTES), 100)) {
-            boolean retrying = claimService.retryOrFail(stale, "WORKER_LEASE_EXPIRED",
+            AsyncJobClaimService.FailureOutcome outcome = claimService.retryOrFail(
+                    stale, "WORKER_LEASE_EXPIRED",
                     "任务执行节点超时，已重新调度");
-            if (!retrying) {
+            if (outcome == AsyncJobClaimService.FailureOutcome.FAILED) {
                 fileMapper.updateSecurityScanResult(stale.getOrganizationId(), stale.getTargetId(),
                         "FAILED", null, Instant.now().plusSeconds(86_400));
             }
@@ -79,7 +81,7 @@ public class FileSecurityScanWorker {
                 job.getOrganizationId(), job.getTargetId());
         if (file == null) throw new IllegalStateException("FILE_NOT_FOUND");
         if (!"SCANNING".equals(file.getScanStatus())) {
-            claimService.succeed(job.getId(), writeResult(Map.of("outcome", "SKIPPED",
+            claimService.succeed(job, writeResult(Map.of("outcome", "SKIPPED",
                     "reason", "FILE_STATUS_" + file.getScanStatus())));
             return;
         }
@@ -97,7 +99,7 @@ public class FileSecurityScanWorker {
                 result.put("outcome", "REJECTED");
                 result.put("reason", "CONTENT_MISMATCH");
                 updateFile(file, "REJECTED");
-                claimService.succeed(job.getId(), writeResult(result));
+                claimService.succeed(job, writeResult(result));
                 return;
             }
             MalwareScanner.ScanResult malware = malwareScanner.scan(temp);
@@ -118,7 +120,7 @@ public class FileSecurityScanWorker {
                     result.put("reason", "MALWARE_SCANNER_NOT_CONFIGURED");
                 }
             }
-            claimService.succeed(job.getId(), writeResult(result));
+            claimService.succeed(job, writeResult(result));
         } finally {
             Files.deleteIfExists(temp);
         }

@@ -12,6 +12,21 @@ import java.util.List;
 @Mapper
 public interface ProjectMapper extends BaseMapper<Project> {
 
+    @Select("SELECT * FROM project WHERE organization_id=#{organizationId} AND id=#{projectId} FOR UPDATE")
+    Project lockOne(@Param("organizationId") String organizationId,
+                    @Param("projectId") String projectId);
+
+    @Select("""
+            SELECT p.* FROM project p
+            JOIN application_form af ON af.project_id=p.id AND af.organization_id=p.organization_id
+            JOIN form_version fv ON fv.form_id=af.id AND fv.organization_id=af.organization_id
+            JOIN application a ON a.form_version_id=fv.id AND a.organization_id=fv.organization_id
+            WHERE p.organization_id=#{organizationId} AND a.id=#{applicationId}
+            FOR UPDATE
+            """)
+    Project lockForApplication(@Param("organizationId") String organizationId,
+                               @Param("applicationId") String applicationId);
+
     @Select("""
             <script>
             SELECT DISTINCT p.* FROM project p

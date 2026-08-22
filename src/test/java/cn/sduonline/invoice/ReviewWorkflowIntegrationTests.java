@@ -397,6 +397,13 @@ class ReviewWorkflowIntegrationTests {
             assertThat(invoiceStatus(invoiceOne)).isEqualTo("ARCHIVED");
             assertThat(invoiceStatus(invoiceTwo)).isEqualTo("ARCHIVED");
             assertThat(applicationStatus(applicationId)).isEqualTo("COMPLETED");
+            var archivedCorrection = externalStatusService.correct(
+                    finalBatchId, submitted.id(), admin,
+                    new CorrectExternalEventRequest("COMPLETED", "归档后补充更正说明",
+                            List.of(), 6L));
+            assertThat(archivedCorrection.correctionOfEventId()).isEqualTo(submitted.id());
+            assertThat(exportBatchService.detail(finalBatchId).status()).isEqualTo("ARCHIVED");
+            assertThat(exportBatchService.detail(finalBatchId).version()).isEqualTo(6L);
 
             long adminVersion = jdbcTemplate.queryForObject("""
                     SELECT version FROM organization_member WHERE organization_id=? AND cas_id=?
