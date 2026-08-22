@@ -85,6 +85,9 @@ public class ExternalStatusService {
         ExportBatch batch = requireBatch(batchId);
         authorizationService.requireProjectManage(batch.getProjectId());
         if (batch.getVersion() == null || batch.getVersion() != version) conflict();
+        // 平台外状态记录的是“材料离开平台后”的处理结果，草稿批次尚未生成任何产物，
+        // 不应存在平台外事件；取消草稿批次请走导出批次自身的取消接口。
+        if ("DRAFT".equals(batch.getStatus())) state();
         return batch;
     }
 
