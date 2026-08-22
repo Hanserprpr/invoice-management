@@ -94,7 +94,7 @@ public class ApplicationService {
         Application existing = applicationMapper.findEditableForApplicant(
                 organizationId, formId, actorCasId);
         if (existing != null) return toVO(existing);
-        requireCurrentlyAvailable(form);
+        requireCurrentlyAvailable(form, true);
         int submitted = applicationMapper.countSubmittedForApplicant(
                 organizationId, formId, actorCasId);
         if (submitted >= form.getMaxSubmissionsPerUser()) {
@@ -164,12 +164,12 @@ public class ApplicationService {
         requireVersion(application, request.version());
         FormVersion formVersion = requireFormVersion(application.getFormVersionId());
         ApplicationForm form = requireForm(formVersion.getFormId());
-        requireCurrentlyAvailable(form);
+        applicationMapper.lockApplicant(actorCasId);
+        requireCurrentlyAvailable(form, true);
         requireSubmissionScope(form);
         FormSchema schema = readSchema(formVersion.getSchemaJson());
         JsonNode answers = readTree(application.getAnswersJson());
         answerValidator.validate(schema, answers, true);
-        applicationMapper.lockApplicant(actorCasId);
         int submitted = applicationMapper.countSubmittedForApplicant(
                 application.getOrganizationId(), form.getId(), actorCasId);
         if (("DRAFT".equals(application.getStatus()) && submitted >= form.getMaxSubmissionsPerUser())
@@ -204,6 +204,10 @@ public class ApplicationService {
     }
 
     private void requireCurrentlyAvailable(ApplicationForm form) {
+        requireCurrentlyAvailable(form, false);
+    }
+
+    private void requireCurrentlyAvailable(ApplicationForm form, boolean lockProject) {
         if (!"PUBLISHED".equals(form.getStatus())) {
             throw new BusinessException(BizCode.FORM_NOT_PUBLISHED, HttpStatus.CONFLICT);
         }
@@ -212,9 +216,11 @@ public class ApplicationService {
                 || form.getEndsAt() != null && now.isAfter(form.getEndsAt())) {
             throw new BusinessException(BizCode.SUBMISSION_WINDOW_CLOSED, HttpStatus.CONFLICT);
         }
-        Project project = projectMapper.selectOne(new LambdaQueryWrapper<Project>()
-                .eq(Project::getOrganizationId, form.getOrganizationId())
-                .eq(Project::getId, form.getProjectId()));
+        Project project = lockProject
+                ? projectMapper.lockOne(form.getOrganizationId(), form.getProjectId())
+                : projectMapper.selectOne(new LambdaQueryWrapper<Project>()
+                        .eq(Project::getOrganizationId, form.getOrganizationId())
+                        .eq(Project::getId, form.getProjectId()));
         if (project == null) throw new BusinessException(BizCode.PROJECT_NOT_FOUND, HttpStatus.NOT_FOUND);
         if (!"COLLECTING".equals(project.getStatus())) {
             throw new BusinessException(BizCode.SUBMISSION_WINDOW_CLOSED, HttpStatus.CONFLICT);

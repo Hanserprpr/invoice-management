@@ -88,7 +88,7 @@ public class ExportGenerationWorker {
         ExportBatch batch = batchMapper.findOne(job.getOrganizationId(), job.getTargetId());
         if (batch != null && "GENERATED".equals(batch.getStatus())
                 && artifactMapper.findForBatch(job.getOrganizationId(), batch.getId()).size() == 4) {
-            claimService.succeed(job.getId(), "{\"outcome\":\"ALREADY_GENERATED\",\"artifactCount\":4}");
+            claimService.succeed(job, "{\"outcome\":\"ALREADY_GENERATED\",\"artifactCount\":4}");
             return;
         }
         if (batch == null || !"DRAFT".equals(batch.getStatus())) {
@@ -99,6 +99,7 @@ public class ExportGenerationWorker {
         Path directory = Files.createTempDirectory("invoice-export-");
         List<ExportArtifactPersistenceService.GeneratedArtifact> generated = new ArrayList<>();
         List<String> uploadedKeys = new ArrayList<>();
+        boolean persisted = false;
         try {
             Path xlsx = directory.resolve("invoice-ledger.xlsx");
             writeWorkbook(xlsx, items);
@@ -113,14 +114,16 @@ public class ExportGenerationWorker {
             Path manifest = directory.resolve("manifest.json");
             writeManifest(manifest, batch, generated);
             generated.add(upload(job, manifest, "MANIFEST_JSON", "application/json", uploadedKeys));
-            persistenceService.persist(job.getOrganizationId(), batch.getId(), job.getId(),
-                    job.getCreatedByCasId(), generated);
-            claimService.succeed(job.getId(), objectMapper.writeValueAsString(Map.of(
+            persistenceService.persist(job, batch.getId(), generated);
+            persisted = true;
+            claimService.succeed(job, objectMapper.writeValueAsString(Map.of(
                     "outcome", "GENERATED", "artifactCount", generated.size())));
         } catch (Exception exception) {
-            uploadedKeys.forEach(key -> {
-                try { storage.delete(key); } catch (RuntimeException ignored) { }
-            });
+            if (!persisted) {
+                uploadedKeys.forEach(key -> {
+                    try { storage.delete(key); } catch (RuntimeException ignored) { }
+                });
+            }
             throw exception;
         } finally {
             deleteDirectory(directory);
@@ -133,7 +136,7 @@ public class ExportGenerationWorker {
         String fileId = UlidGenerator.next();
         String fileName = source.getFileName().toString();
         String key = job.getOrganizationId() + "/exports/" + job.getTargetId() + "/"
-                + job.getId() + "/" + fileName;
+                + job.getId() + "/attempt-" + job.getLeaseVersion() + "/" + fileName;
         String hash = sha256(source);
         storage.uploadFrom(key, source, contentType, hash);
         uploadedKeys.add(key);

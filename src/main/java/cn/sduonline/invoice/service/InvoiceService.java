@@ -31,6 +31,7 @@ public class InvoiceService {
     private final InvoiceFileRevisionMapper revisionMapper;
     private final AttachmentMapper attachmentMapper;
     private final ApplicationMapper applicationMapper;
+    private final ProjectMapper projectMapper;
     private final DictionaryItemMapper dictionaryItemMapper;
     private final FileObjectService fileService;
     private final AuditService auditService;
@@ -41,6 +42,7 @@ public class InvoiceService {
                           InvoiceFileRevisionMapper revisionMapper,
                           AttachmentMapper attachmentMapper,
                           ApplicationMapper applicationMapper,
+                          ProjectMapper projectMapper,
                           DictionaryItemMapper dictionaryItemMapper,
                           FileObjectService fileService,
                           AuditService auditService,
@@ -50,6 +52,7 @@ public class InvoiceService {
         this.revisionMapper = revisionMapper;
         this.attachmentMapper = attachmentMapper;
         this.applicationMapper = applicationMapper;
+        this.projectMapper = projectMapper;
         this.dictionaryItemMapper = dictionaryItemMapper;
         this.fileService = fileService;
         this.auditService = auditService;
@@ -269,6 +272,11 @@ public class InvoiceService {
     private void requireApplicationEditable(Application application) {
         if (!EDITABLE.contains(application.getStatus())) {
             throw new BusinessException(BizCode.APPLICATION_STATE_NOT_ALLOWED, HttpStatus.CONFLICT);
+        }
+        Project project = projectMapper.lockForApplication(
+                application.getOrganizationId(), application.getId());
+        if (project == null || "ARCHIVED".equals(project.getStatus())) {
+            throw new BusinessException(BizCode.PROJECT_STATE_NOT_ALLOWED, HttpStatus.CONFLICT);
         }
     }
 

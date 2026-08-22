@@ -76,9 +76,10 @@ public class IdempotencyService {
         }
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.MANDATORY)
     public void complete(String recordId, int responseStatus, String responseBody) {
-        if (mapper.complete(recordId, responseStatus, responseBody) != 1) {
+        if (mapper.complete(recordId, responseStatus, responseBody,
+                Instant.now().plus(properties.getTtl())) != 1) {
             throw new IllegalStateException("IDEMPOTENCY_CLAIM_NOT_PROCESSING");
         }
     }
@@ -108,7 +109,7 @@ public class IdempotencyService {
                 .requestHash(request.requestHash())
                 .status("PROCESSING")
                 .createdAt(now)
-                .expiresAt(now.plus(properties.getTtl()))
+                .expiresAt(now.plus(properties.getProcessingTtl()))
                 .build();
     }
 

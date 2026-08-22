@@ -42,7 +42,7 @@ public class NotificationDeliveryWorker {
                 Notification notification = mapper.selectById(job.getTargetId());
                 if (notification == null) throw new IllegalStateException("通知不存在");
                 var result = adapter.deliver(notification);
-                claimService.succeed(job.getId(), objectMapper.writeValueAsString(
+                claimService.succeed(job, objectMapper.writeValueAsString(
                         Map.of("outcome", result.outcome())));
             }
         } catch (Exception exception) {

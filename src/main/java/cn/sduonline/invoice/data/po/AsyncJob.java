@@ -29,6 +29,7 @@ public class AsyncJob {
     private Integer progress;
     private Integer attemptCount;
     private Integer maxAttempts;
+    private Long leaseVersion;
     private String requestJson;
     private String resultJson;
     private String errorCode;

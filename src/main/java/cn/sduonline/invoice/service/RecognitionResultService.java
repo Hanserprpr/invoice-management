@@ -47,11 +47,26 @@ public class RecognitionResultService {
     }
 
     @Transactional
-    public void persist(AsyncJob job, RecognitionResult result) {
+    public void persist(AsyncJob job, String sourceFileId, RecognitionResult result) {
         Invoice invoice = invoiceMapper.lockById(job.getOrganizationId(), job.getTargetId());
         AsyncJob currentJob = jobMapper.lockById(job.getId());
-        if (currentJob == null || !"RUNNING".equals(currentJob.getStatus())) {
+        if (!sameRunningLease(currentJob, job)) {
             throw new IllegalStateException("RECOGNITION_JOB_NOT_RUNNING");
+        }
+        if (invoice != null && !sourceFileId.equals(invoice.getCurrentFileId())) {
+            if ("PENDING_RECOGNITION".equals(invoice.getStatus())) {
+                if (invoiceMapper.restoreDraftIfPending(
+                        job.getOrganizationId(), job.getTargetId()) != 1) {
+                    throw new IllegalStateException("INVOICE_STATE_CHANGED");
+                }
+            }
+            Map<String, Object> discarded = new LinkedHashMap<>();
+            discarded.put("outcome", "DISCARDED_FILE_CHANGED");
+            discarded.put("sourceFileId", sourceFileId);
+            discarded.put("currentFileId", invoice.getCurrentFileId());
+            discarded.put("suggestionCount", 0);
+            succeed(job, discarded);
+            return;
         }
         if (invoice == null || !LANDABLE_STATES.contains(invoice.getStatus())) {
             Map<String, Object> discarded = new LinkedHashMap<>();
@@ -105,7 +120,7 @@ public class RecognitionResultService {
     public void recordFailure(AsyncJob job, String errorCode, String errorMessage) {
         Invoice invoice = invoiceMapper.lockById(job.getOrganizationId(), job.getTargetId());
         AsyncJob currentJob = jobMapper.lockById(job.getId());
-        if (currentJob == null || !"RUNNING".equals(currentJob.getStatus())) return;
+        if (!sameRunningLease(currentJob, job)) return;
         claimService.retryOrFail(currentJob, errorCode, errorMessage);
         if (invoice != null && "PENDING_RECOGNITION".equals(invoice.getStatus())) {
             invoiceMapper.restoreDraftIfPending(job.getOrganizationId(), job.getTargetId());
@@ -114,7 +129,8 @@ public class RecognitionResultService {
 
     private void succeed(AsyncJob job, Map<String, Object> jobResult) {
         try {
-            if (jobMapper.succeed(job.getId(), objectMapper.writeValueAsString(jobResult)) != 1) {
+            if (jobMapper.succeed(job.getId(), job.getLeaseVersion(),
+                    objectMapper.writeValueAsString(jobResult)) != 1) {
                 throw new IllegalStateException("RECOGNITION_JOB_NOT_RUNNING");
             }
         } catch (Exception exception) {
@@ -131,6 +147,12 @@ public class RecognitionResultService {
         if (confidence.compareTo(BigDecimal.ONE) > 0) return BigDecimal.ONE;
         return confidence.setScale(Math.min(4, Math.max(0, confidence.scale())),
                 java.math.RoundingMode.HALF_UP);
+    }
+
+    private boolean sameRunningLease(AsyncJob current, AsyncJob claimed) {
+        return current != null && "RUNNING".equals(current.getStatus())
+                && current.getLeaseVersion() != null
+                && current.getLeaseVersion().equals(claimed.getLeaseVersion());
     }
 
     private String truncate(String value, int max) {

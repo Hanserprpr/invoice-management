@@ -1,5 +1,6 @@
 package cn.sduonline.invoice.security;
 
+import cn.sduonline.invoice.config.IdempotencyProperties;
 import cn.sduonline.invoice.data.enums.BizCode;
 import cn.sduonline.invoice.exception.BusinessException;
 import cn.sduonline.invoice.service.IdempotencyService;
@@ -15,7 +16,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
@@ -38,10 +42,20 @@ public class IdempotencyFilter extends OncePerRequestFilter {
 
     private final IdempotencyService service;
     private final SecurityErrorWriter errorWriter;
+    private final TransactionTemplate transactionTemplate;
+    private final long maxRequestBytes;
 
-    public IdempotencyFilter(IdempotencyService service, SecurityErrorWriter errorWriter) {
+    public IdempotencyFilter(IdempotencyService service, SecurityErrorWriter errorWriter,
+                             PlatformTransactionManager transactionManager,
+                             IdempotencyProperties properties) {
         this.service = service;
         this.errorWriter = errorWriter;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        if (properties.getMaxRequestBytes() < 1
+                || properties.getMaxRequestBytes() >= Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("app.idempotency.max-request-bytes is out of range");
+        }
+        this.maxRequestBytes = properties.getMaxRequestBytes();
     }
 
     @Override
@@ -71,7 +85,13 @@ public class IdempotencyFilter extends OncePerRequestFilter {
             return;
         }
 
-        CachedBodyRequest cachedRequest = new CachedBodyRequest(request);
+        CachedBodyRequest cachedRequest;
+        try {
+            cachedRequest = new CachedBodyRequest(request, maxRequestBytes);
+        } catch (RequestBodyTooLargeException exception) {
+            errorWriter.write(response, HttpStatus.PAYLOAD_TOO_LARGE.value(), BizCode.PARAM_INVALID);
+            return;
+        }
         TenantContext.TenantInfo tenant = TenantContext.getNullable();
         String organizationId = tenant == null ? null : tenant.organizationId();
         String scope = organizationId == null ? "GLOBAL" : "ORG:" + organizationId;
@@ -91,24 +111,45 @@ public class IdempotencyFilter extends OncePerRequestFilter {
 
         String claimId = ((Acquired) outcome).recordId();
         ContentCachingResponseWrapper cachedResponse = new ContentCachingResponseWrapper(response);
-        boolean downstreamCompleted = false;
+        boolean transactionCompleted = false;
         try {
-            filterChain.doFilter(cachedRequest, cachedResponse);
-            downstreamCompleted = true;
-            byte[] body = cachedResponse.getContentAsByteArray();
-            service.complete(claimId, cachedResponse.getStatus(),
-                    new String(body, responseCharset(cachedResponse)));
-        } catch (IOException | ServletException | RuntimeException exception) {
-            if (!downstreamCompleted) {
-                try {
-                    service.release(claimId);
-                } catch (RuntimeException releaseException) {
-                    exception.addSuppressed(releaseException);
-                }
+            transactionTemplate.executeWithoutResult(ignored -> executeDownstream(
+                    filterChain, cachedRequest, cachedResponse, claimId));
+            transactionCompleted = true;
+        } catch (DownstreamException exception) {
+            release(claimId, exception);
+            if (exception.getCause() instanceof IOException ioException) throw ioException;
+            if (exception.getCause() instanceof ServletException servletException) {
+                throw servletException;
             }
             throw exception;
+        } catch (RuntimeException exception) {
+            release(claimId, exception);
+            throw exception;
         } finally {
-            cachedResponse.copyBodyToResponse();
+            if (transactionCompleted) {
+                cachedResponse.copyBodyToResponse();
+            }
+        }
+    }
+
+    private void executeDownstream(FilterChain filterChain, CachedBodyRequest request,
+                                   ContentCachingResponseWrapper response, String claimId) {
+        try {
+            filterChain.doFilter(request, response);
+            byte[] body = response.getContentAsByteArray();
+            service.complete(claimId, response.getStatus(),
+                    new String(body, responseCharset(response)));
+        } catch (IOException | ServletException exception) {
+            throw new DownstreamException(exception);
+        }
+    }
+
+    private void release(String claimId, RuntimeException original) {
+        try {
+            service.release(claimId);
+        } catch (RuntimeException releaseException) {
+            original.addSuppressed(releaseException);
         }
     }
 
@@ -144,9 +185,16 @@ public class IdempotencyFilter extends OncePerRequestFilter {
     private static final class CachedBodyRequest extends HttpServletRequestWrapper {
         private final byte[] body;
 
-        private CachedBodyRequest(HttpServletRequest request) throws IOException {
+        private CachedBodyRequest(HttpServletRequest request, long maxRequestBytes)
+                throws IOException {
             super(request);
-            this.body = request.getInputStream().readAllBytes();
+            if (request.getContentLengthLong() > maxRequestBytes) {
+                throw new RequestBodyTooLargeException();
+            }
+            this.body = request.getInputStream().readNBytes((int) maxRequestBytes + 1);
+            if (body.length > maxRequestBytes) {
+                throw new RequestBodyTooLargeException();
+            }
         }
 
         @Override
@@ -201,6 +249,15 @@ public class IdempotencyFilter extends OncePerRequestFilter {
         @Override
         public long getContentLengthLong() {
             return body.length;
+        }
+    }
+
+    private static final class RequestBodyTooLargeException extends IOException {
+    }
+
+    private static final class DownstreamException extends RuntimeException {
+        private DownstreamException(Exception cause) {
+            super(cause);
         }
     }
 }

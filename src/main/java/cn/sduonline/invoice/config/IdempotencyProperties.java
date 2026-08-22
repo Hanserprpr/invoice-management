@@ -7,7 +7,9 @@ import java.time.Duration;
 @ConfigurationProperties("app.idempotency")
 public class IdempotencyProperties {
     private Duration ttl = Duration.ofMinutes(5);
+    private Duration processingTtl = Duration.ofHours(1);
     private int cleanupBatchSize = 1000;
+    private long maxRequestBytes = 2 * 1024 * 1024;
 
     public Duration getTtl() {
         return ttl;
@@ -17,11 +19,27 @@ public class IdempotencyProperties {
         this.ttl = ttl;
     }
 
+    public Duration getProcessingTtl() {
+        return processingTtl;
+    }
+
+    public void setProcessingTtl(Duration processingTtl) {
+        this.processingTtl = processingTtl;
+    }
+
     public int getCleanupBatchSize() {
         return cleanupBatchSize;
     }
 
     public void setCleanupBatchSize(int cleanupBatchSize) {
         this.cleanupBatchSize = cleanupBatchSize;
+    }
+
+    public long getMaxRequestBytes() {
+        return maxRequestBytes;
+    }
+
+    public void setMaxRequestBytes(long maxRequestBytes) {
+        this.maxRequestBytes = maxRequestBytes;
     }
 }

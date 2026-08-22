@@ -201,7 +201,10 @@ public class ProjectService {
 
     @Transactional
     public ProjectVO archive(String projectId, String actorCasId, ChangeStateRequest request) {
-        Project project = requireProject(projectId);
+        Project project = projectMapper.lockOne(TenantContext.requireOrganizationId(), projectId);
+        if (project == null) {
+            throw new BusinessException(BizCode.PROJECT_NOT_FOUND, HttpStatus.NOT_FOUND);
+        }
         authorizationService.requireProjectManage(projectId);
         if (!Set.of("DRAFT", "COLLECTING", "ORGANIZING").contains(project.getStatus())) {
             throw stateConflict();

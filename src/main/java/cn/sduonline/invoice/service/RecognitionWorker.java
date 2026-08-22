@@ -67,7 +67,8 @@ public class RecognitionWorker {
         Path temp = Files.createTempFile("invoice-recognition-", ".bin");
         try {
             objectStorage.downloadTo(file.getStorageKey(), temp);
-            resultService.persist(job, recognitionAdapter.recognize(temp, file.getContentType()));
+            resultService.persist(job, file.getId(),
+                    recognitionAdapter.recognize(temp, file.getContentType()));
         } finally {
             Files.deleteIfExists(temp);
         }
