@@ -128,8 +128,11 @@ public class SecurityConfig {
                         .failureHandler((request, response, exception) ->
                                 securityErrorWriter.write(response, 401, BizCode.TOKEN_INVALID))
                 )
-                .csrf(csrf -> csrf.csrfTokenRepository(
-                        CookieCsrfTokenRepository.withHttpOnlyFalse()))
+                .csrf(csrf -> {
+                    CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+                    repository.setCookieCustomizer(cookie -> cookie.sameSite("None").secure(true));
+                    csrf.csrfTokenRepository(repository);
+                })
                 .addFilterAfter(tenantContextFilter, AnonymousAuthenticationFilter.class)
                 .addFilterAfter(idempotencyFilter, TenantContextFilter.class)
                 .exceptionHandling(exceptions -> exceptions

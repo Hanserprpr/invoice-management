@@ -6,6 +6,7 @@ import cn.sduonline.invoice.data.po.User;
 import cn.sduonline.invoice.mapper.UserMapper;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
+import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -37,6 +38,23 @@ public class AuthController {
     @GetMapping("/login-url")
     public Result<Map<String, String>> loginUrl() {
         return Result.ok(Map.of("url", "/oauth2/authorization/sdu"));
+    }
+
+    /**
+     * 获取当前会话的 CSRF 令牌。
+     *
+     * <p>供跨域本地前端读取令牌后，在写请求的 `X-XSRF-TOKEN` 请求头中回传。
+     * 该接口仍要求已登录会话；令牌同时由安全框架写入 `XSRF-TOKEN` Cookie。
+     *
+     * <ul>
+     *   <li>权限：任意已登录用户。</li>
+     *   <li>请求头：不需要 `X-Organization-Id`。</li>
+     *   <li>成功：`200`，`data.token` 为当前会话的 CSRF 令牌。</li>
+     * </ul>
+     */
+    @GetMapping("/csrf")
+    public Result<Map<String, String>> csrf(CsrfToken csrfToken) {
+        return Result.ok(Map.of("token", csrfToken.getToken()));
     }
 
     /**

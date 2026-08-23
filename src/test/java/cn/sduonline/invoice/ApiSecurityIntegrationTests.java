@@ -52,6 +52,16 @@ class ApiSecurityIntegrationTests {
     }
 
     @Test
+    void csrfEndpointReturnsTokenForAuthenticatedSession() throws Exception {
+        mockMvc.perform(get("/auth/csrf").with(user("csrf-user")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.token").isNotEmpty())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .header().string("Set-Cookie", org.hamcrest.Matchers.containsString("SameSite=None")));
+    }
+
+    @Test
     void healthProbeIsAnonymousAndEveryResponseHasSafeRequestId() throws Exception {
         mockMvc.perform(get("/actuator/health/liveness")
                         .header("X-Request-Id", "d5-health-check"))
