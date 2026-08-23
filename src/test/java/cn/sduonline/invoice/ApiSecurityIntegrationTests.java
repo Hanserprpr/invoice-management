@@ -57,8 +57,8 @@ class ApiSecurityIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.token").isNotEmpty())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                        .header().string("Set-Cookie", org.hamcrest.Matchers.containsString("SameSite=None")));
+                .andExpect(result -> assertThat(result.getResponse()
+                        .getCookie("XSRF-TOKEN").getAttribute("SameSite")).isEqualTo("None"));
     }
 
     @Test
