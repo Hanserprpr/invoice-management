@@ -4,6 +4,7 @@ import cn.sduonline.invoice.mapper.OrganizationMemberMapper;
 import cn.sduonline.invoice.service.OrganizationService;
 import cn.sduonline.invoice.service.MemberService;
 import cn.sduonline.invoice.service.AsyncJobClaimService;
+import cn.sduonline.invoice.service.DictionaryQueryService;
 import cn.sduonline.invoice.data.dto.OrganizationDtos.CreateOrganizationRequest;
 import cn.sduonline.invoice.data.dto.OrganizationDtos.CreateMemberRequest;
 import cn.sduonline.invoice.data.dto.OrganizationDtos.InitialAdmin;
@@ -20,6 +21,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.time.LocalDate;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -41,6 +43,7 @@ class DatabaseMigrationIntegrationTests {
     @Autowired OrganizationService organizationService;
     @Autowired MemberService memberService;
     @Autowired AsyncJobClaimService asyncJobClaimService;
+    @Autowired DictionaryQueryService dictionaryQueryService;
 
     @BeforeEach
     void requireDedicatedTestDatabase() {
@@ -218,12 +221,25 @@ class DatabaseMigrationIntegrationTests {
                 """);
         var organization = organizationService.create("platform-test",
                 new CreateOrganizationRequest("服务集成测试社团", "CLUB",
-                        new InitialAdmin("club-admin-test", "社团管理员", null, null)));
+                        new InitialAdmin("club-admin-test", "社团管理员",
+                                LocalDate.of(2026, 8, 22), LocalDate.of(2027, 8, 23))));
 
+        assertThat(organization.createdAt()).isNotNull();
+        assertThat(organization.updatedAt()).isNotNull();
+        assertThat(organizationService.listPlatform("platform-test", 1, 20, "服务集成", "ACTIVE")
+                .records()).extracting("id").contains(organization.id());
+        assertThat(organizationService.getPlatform("platform-test", organization.id()).id())
+                .isEqualTo(organization.id());
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM dictionary_version WHERE organization_id=?",
                 Integer.class, organization.id())).isEqualTo(2);
         try (TenantContext.Scope ignored = TenantContext.open(organization.id(), "club-admin-test")) {
+            var admin = memberService.detail(organization.id(), "club-admin-test");
+            assertThat(admin.termStart()).isEqualTo(LocalDate.of(2026, 8, 22));
+            assertThat(admin.termEnd()).isEqualTo(LocalDate.of(2027, 8, 23));
+            assertThat(admin.roleAssignments()).extracting("code").containsExactly("CLUB_ADMIN");
+            assertThat(dictionaryQueryService.listPublishedItems("RETURN_REASON"))
+                    .isNotEmpty().allSatisfy(item -> assertThat(item.name()).isNotBlank());
             var member = memberService.create(organization.id(), "club-admin-test",
                     new CreateMemberRequest("reviewer-test", "审核人", null, null));
             assertThat(member.roles()).containsExactly("MEMBER");
@@ -233,6 +249,8 @@ class DatabaseMigrationIntegrationTests {
                             List.of(new RoleAssignment("REVIEWER", null, null)), List.of()));
             assertThat(replaced.version()).isEqualTo(1);
             assertThat(replaced.roles()).containsExactly("REVIEWER");
+            assertThat(memberService.detail(organization.id(), "reviewer-test").roleAssignments())
+                    .extracting("code").containsExactly("REVIEWER");
         }
     }
 

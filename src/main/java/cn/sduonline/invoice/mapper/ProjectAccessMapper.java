@@ -12,6 +12,9 @@ import java.util.List;
 @Mapper
 public interface ProjectAccessMapper {
 
+    record MemberProjectAccessRow(String projectId, String accessType) {
+    }
+
     @Delete("DELETE FROM project_access WHERE organization_id=#{organizationId} AND member_id=#{memberId}")
     int deleteForMember(@Param("organizationId") String organizationId,
                         @Param("memberId") String memberId);
@@ -36,4 +39,12 @@ public interface ProjectAccessMapper {
             """)
     List<String> findAccessBindings(@Param("organizationId") String organizationId,
                                     @Param("projectId") String projectId);
+
+    @Select("""
+            SELECT project_id,access_type FROM project_access
+            WHERE organization_id=#{organizationId} AND member_id=#{memberId}
+            ORDER BY project_id,access_type
+            """)
+    List<MemberProjectAccessRow> findForMember(@Param("organizationId") String organizationId,
+                                                @Param("memberId") String memberId);
 }

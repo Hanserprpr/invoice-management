@@ -3,14 +3,19 @@ package cn.sduonline.invoice.controller;
 import cn.sduonline.invoice.data.dto.OrganizationDtos.CreateOrganizationRequest;
 import cn.sduonline.invoice.data.dto.OrganizationDtos.UpdateOrganizationRequest;
 import cn.sduonline.invoice.data.vo.OrganizationVO;
+import cn.sduonline.invoice.data.vo.PageResult;
 import cn.sduonline.invoice.data.vo.Result;
 import cn.sduonline.invoice.service.OrganizationService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.validation.annotation.Validated;
 
+@Validated
 @RestController
 @RequestMapping("/api/platform/organizations")
 public class PlatformOrganizationController {
@@ -18,6 +23,23 @@ public class PlatformOrganizationController {
 
     public PlatformOrganizationController(OrganizationService organizationService) {
         this.organizationService = organizationService;
+    }
+
+    @GetMapping
+    public Result<PageResult<OrganizationVO>> list(
+            Authentication authentication,
+            @RequestParam(defaultValue = "1") @Min(1) long page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) long pageSize,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String status) {
+        return Result.ok(organizationService.listPlatform(authentication.getName(), page, pageSize,
+                keyword, status));
+    }
+
+    @GetMapping("/{organizationId}")
+    public Result<OrganizationVO> detail(Authentication authentication,
+                                         @PathVariable String organizationId) {
+        return Result.ok(organizationService.getPlatform(authentication.getName(), organizationId));
     }
 
     /**
@@ -53,10 +75,10 @@ public class PlatformOrganizationController {
      *   <li>常见错误：`20003` 非平台管理员；`31000` 社团不存在；`10007` 版本冲突。</li>
      * </ul>
      */
-    @PatchMapping("/{id}")
+    @PatchMapping("/{organizationId}")
     public Result<OrganizationVO> update(Authentication authentication,
-                                         @PathVariable String id,
+                                         @PathVariable String organizationId,
                                          @Valid @RequestBody UpdateOrganizationRequest request) {
-        return Result.ok(organizationService.update(authentication.getName(), id, request));
+        return Result.ok(organizationService.update(authentication.getName(), organizationId, request));
     }
 }

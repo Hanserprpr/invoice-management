@@ -24,7 +24,14 @@ public record ProjectVO(
         Instant updatedAt,
         Instant archivedAt,
         List<String> managerCasIds,
-        List<AccessGrantVO> accessGrants) {
+        List<AccessGrantVO> accessGrants,
+        long invoiceCount,
+        long processedCount,
+        long pendingReviewCount,
+        long submitterCount,
+        BigDecimal totalAmount,
+        long paperTotalCount,
+        long paperReceivedCount) {
 
     public record AccessGrantVO(String casId, Set<String> accessTypes) {
     }

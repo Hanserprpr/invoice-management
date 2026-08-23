@@ -25,4 +25,18 @@ public interface DictionaryItemMapper extends BaseMapper<DictionaryItem> {
     DictionaryItem findEnabledByType(@Param("organizationId") String organizationId,
                                      @Param("itemId") String itemId,
                                      @Param("dictionaryType") String dictionaryType);
+
+    @Select("""
+            SELECT di.* FROM dictionary_item di
+            JOIN dictionary_version dv ON dv.id=di.dictionary_version_id
+              AND dv.organization_id=di.organization_id
+            WHERE di.organization_id=#{organizationId} AND dv.dictionary_type=#{dictionaryType}
+              AND dv.status='PUBLISHED' AND di.enabled=TRUE
+              AND dv.version_no=(SELECT MAX(latest.version_no) FROM dictionary_version latest
+                WHERE latest.organization_id=#{organizationId}
+                  AND latest.dictionary_type=#{dictionaryType} AND latest.status='PUBLISHED')
+            ORDER BY di.sort_order,di.id
+            """)
+    List<DictionaryItem> findPublishedEnabled(@Param("organizationId") String organizationId,
+                                               @Param("dictionaryType") String dictionaryType);
 }

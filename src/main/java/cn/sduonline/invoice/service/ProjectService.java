@@ -314,6 +314,8 @@ public class ProjectService {
         }
         List<AccessGrantVO> access = grants.entrySet().stream()
                 .map(entry -> new AccessGrantVO(entry.getKey(), entry.getValue())).toList();
+        ProjectMapper.ProjectSummary summary = projectMapper.summarize(
+                project.getOrganizationId(), project.getId());
         return new ProjectVO(project.getId(), project.getOrganizationId(), project.getName(),
                 project.getDescription(), project.getBudget(), project.getFundingSource(),
                 Boolean.TRUE.equals(project.getPaperRequired()), project.getRuleSetVersionId(),
@@ -321,7 +323,14 @@ public class ProjectService {
                 project.getStartAt(), project.getEndAt(), project.getStatus(),
                 project.getVersion() == null ? 0 : project.getVersion(), project.getCreatedByCasId(),
                 project.getCreatedAt(), project.getUpdatedAt(), project.getArchivedAt(),
-                projectMapper.findManagerCasIds(project.getOrganizationId(), project.getId()), access);
+                projectMapper.findManagerCasIds(project.getOrganizationId(), project.getId()), access,
+                summary == null ? 0 : summary.invoiceCount(),
+                summary == null ? 0 : summary.processedCount(),
+                summary == null ? 0 : summary.pendingReviewCount(),
+                summary == null ? 0 : summary.submitterCount(),
+                summary == null || summary.totalAmount() == null ? java.math.BigDecimal.ZERO : summary.totalAmount(),
+                summary == null ? 0 : summary.paperTotalCount(),
+                summary == null ? 0 : summary.paperReceivedCount());
     }
 
     private String validateRuleVersion(String versionId) {

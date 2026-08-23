@@ -10,6 +10,8 @@ import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 
 import java.util.Map;
 
@@ -53,7 +55,8 @@ public class AuthController {
      * </ul>
      */
     @GetMapping("/csrf")
-    public Result<Map<String, String>> csrf(CsrfToken csrfToken) {
+    @Operation(summary = "获取 CSRF 令牌", description = "返回 data.token，供写请求通过 X-XSRF-TOKEN 头回传")
+    public Result<Map<String, String>> csrf(@Parameter(hidden = true) CsrfToken csrfToken) {
         return Result.ok(Map.of("token", csrfToken.getToken()));
     }
 

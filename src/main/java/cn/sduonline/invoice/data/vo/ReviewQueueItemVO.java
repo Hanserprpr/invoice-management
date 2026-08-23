@@ -7,6 +7,7 @@ public record ReviewQueueItemVO(String invoiceId, String projectId, String proje
                                 String formId, String formName, String applicationId,
                                 String applicantCasId, String applicantName,
                                 BigDecimal faceAmount, BigDecimal claimedAmount,
-                                String invoiceType, String invoiceNumber, String status,
+                                String sellerName, String invoiceType, String invoiceNumber, String status,
+                                long precheckBlockCount, long precheckWarningCount,
                                 long version, Instant submittedAt, Instant updatedAt) {
 }

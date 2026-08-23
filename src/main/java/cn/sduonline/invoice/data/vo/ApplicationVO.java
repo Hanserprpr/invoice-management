@@ -1,9 +1,9 @@
 package cn.sduonline.invoice.data.vo;
 
 import cn.sduonline.invoice.data.dto.FormDtos.FormSchema;
-import tools.jackson.databind.JsonNode;
 
 import java.time.Instant;
+import java.util.Map;
 
 public record ApplicationVO(
         String id,
@@ -13,7 +13,7 @@ public record ApplicationVO(
         String formVersionId,
         int formVersionNo,
         String applicantCasId,
-        JsonNode answers,
+        Map<String, Object> answers,
         FormSchema schema,
         String status,
         long version,

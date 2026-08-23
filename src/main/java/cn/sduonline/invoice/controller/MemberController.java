@@ -47,6 +47,12 @@ public class MemberController {
         return Result.ok(memberService.list(organizationId, page, pageSize));
     }
 
+    @GetMapping("/{casId}")
+    public Result<MemberVO> detail(@PathVariable String organizationId,
+                                   @PathVariable String casId) {
+        return Result.ok(memberService.detail(organizationId, casId));
+    }
+
     /**
      * 向指定组织添加成员。
      *

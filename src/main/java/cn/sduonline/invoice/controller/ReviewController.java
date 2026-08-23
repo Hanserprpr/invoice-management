@@ -45,6 +45,11 @@ public class ReviewController {
         return Result.ok(reviewService.queue(page, pageSize, projectId, status, applicantCasId));
     }
 
+    @GetMapping("/reviews/stats")
+    public Result<ReviewStatsVO> stats(@RequestParam(required = false) String projectId) {
+        return Result.ok(reviewService.stats(projectId));
+    }
+
     /**
      * 获取指定待审核发票的详情。
      *

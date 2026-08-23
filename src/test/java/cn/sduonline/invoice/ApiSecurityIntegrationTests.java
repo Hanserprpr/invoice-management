@@ -80,7 +80,17 @@ class ApiSecurityIntegrationTests {
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.openapi").exists())
-                .andExpect(jsonPath("$.paths['/auth/me']").exists());
+                .andExpect(jsonPath("$.paths['/auth/me']").exists())
+                .andExpect(jsonPath("$.paths['/auth/csrf'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/dictionaries/{dictionaryCode}/items'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/organizations/{organizationId}/members/{casId}'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/platform/organizations'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/platform/organizations/{organizationId}'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/reviews/stats'].get").exists())
+                .andExpect(jsonPath("$.components.schemas.ApplicationVO.properties.answers.type")
+                        .value("object"))
+                .andExpect(jsonPath("$.components.schemas.ApplicationVO.properties.answers.properties")
+                        .doesNotExist());
 
         mockMvc.perform(get("/swagger-ui/index.html"))
                 .andExpect(status().isOk());

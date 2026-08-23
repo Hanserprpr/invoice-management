@@ -9,6 +9,7 @@ import cn.sduonline.invoice.data.po.OrganizationMemberRole;
 import cn.sduonline.invoice.data.po.Role;
 import cn.sduonline.invoice.data.po.User;
 import cn.sduonline.invoice.data.vo.OrganizationVO;
+import cn.sduonline.invoice.data.vo.PageResult;
 import cn.sduonline.invoice.exception.BusinessException;
 import cn.sduonline.invoice.mapper.OrganizationMapper;
 import cn.sduonline.invoice.mapper.OrganizationMemberMapper;
@@ -18,6 +19,7 @@ import cn.sduonline.invoice.mapper.UserMapper;
 import cn.sduonline.invoice.tenant.TenantContext;
 import cn.sduonline.invoice.util.UlidGenerator;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,6 +60,29 @@ public class OrganizationService {
 
     public OrganizationVO get(String organizationId) {
         authorizationService.requireTenantPath(organizationId);
+        Organization organization = organizationMapper.selectById(organizationId);
+        if (organization == null) {
+            throw new BusinessException(BizCode.CLUB_NOT_FOUND, HttpStatus.NOT_FOUND);
+        }
+        return toVO(organization);
+    }
+
+    public PageResult<OrganizationVO> listPlatform(String actorCasId, long page, long pageSize,
+                                                   String keyword, String status) {
+        authorizationService.requirePlatformAdmin(actorCasId);
+        LambdaQueryWrapper<Organization> query = new LambdaQueryWrapper<Organization>()
+                .like(keyword != null && !keyword.isBlank(), Organization::getName,
+                        keyword == null ? null : keyword.trim())
+                .eq(status != null && !status.isBlank(), Organization::getStatus, status)
+                .orderByDesc(Organization::getCreatedAt)
+                .orderByDesc(Organization::getId);
+        Page<Organization> result = organizationMapper.selectPage(new Page<>(page, pageSize), query);
+        return new PageResult<>(result.getRecords().stream().map(this::toVO).toList(),
+                page, pageSize, result.getTotal());
+    }
+
+    public OrganizationVO getPlatform(String actorCasId, String organizationId) {
+        authorizationService.requirePlatformAdmin(actorCasId);
         Organization organization = organizationMapper.selectById(organizationId);
         if (organization == null) {
             throw new BusinessException(BizCode.CLUB_NOT_FOUND, HttpStatus.NOT_FOUND);
@@ -106,7 +131,7 @@ public class OrganizationService {
                     "ORGANIZATION", organizationId, "{\"initialAdmin\":\""
                             + request.initialAdmin().casId() + "\"}");
         }
-        return toVO(organization);
+        return toVO(organizationMapper.selectById(organizationId));
     }
 
     @Transactional
@@ -127,7 +152,7 @@ public class OrganizationService {
             auditService.append(organizationId, actorCasId, "ORGANIZATION_UPDATED",
                     "ORGANIZATION", organizationId, "{\"status\":\"" + organization.getStatus() + "\"}");
         }
-        return toVO(organization);
+        return toVO(organizationMapper.selectById(organizationId));
     }
 
     private void validateTerm(java.time.LocalDate start, java.time.LocalDate end) {
@@ -138,6 +163,7 @@ public class OrganizationService {
 
     private OrganizationVO toVO(Organization organization) {
         return new OrganizationVO(organization.getId(), organization.getName(), organization.getType(),
-                organization.getStatus(), organization.getVersion() == null ? 0 : organization.getVersion());
+                organization.getStatus(), organization.getVersion() == null ? 0 : organization.getVersion(),
+                organization.getCreatedAt(), organization.getUpdatedAt());
     }
 }

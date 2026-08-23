@@ -40,6 +40,7 @@ public class ReviewService {
     private final ObjectMapper objectMapper;
     private final InvoicePrecheckService precheckService;
     private final PaperService paperService;
+    private final FileObjectMapper fileObjectMapper;
 
     public ReviewService(ClubReviewMapper reviewMapper,
                          InvoiceMapper invoiceMapper,
@@ -52,7 +53,8 @@ public class ReviewService {
                          AuditService auditService,
                          ObjectMapper objectMapper,
                          InvoicePrecheckService precheckService,
-                         PaperService paperService) {
+                         PaperService paperService,
+                         FileObjectMapper fileObjectMapper) {
         this.reviewMapper = reviewMapper;
         this.invoiceMapper = invoiceMapper;
         this.applicationMapper = applicationMapper;
@@ -65,6 +67,7 @@ public class ReviewService {
         this.objectMapper = objectMapper;
         this.precheckService = precheckService;
         this.paperService = paperService;
+        this.fileObjectMapper = fileObjectMapper;
     }
 
     public PageResult<ReviewQueueItemVO> queue(long page, long pageSize, String projectId,
@@ -81,8 +84,13 @@ public class ReviewService {
     public ReviewInvoiceDetailVO detail(String invoiceId) {
         ReviewQueueItemVO summary = requireReviewSummary(invoiceId);
         Invoice invoice = requireInvoice(invoiceId);
+        FileObject currentFile = fileObjectMapper.findByOrganizationAndId(
+                invoice.getOrganizationId(), invoice.getCurrentFileId());
+        ReviewInvoiceDetailVO.CurrentFileVO currentFileVO = currentFile == null ? null
+                : new ReviewInvoiceDetailVO.CurrentFileVO(currentFile.getId(),
+                currentFile.getOriginalName(), currentFile.getContentType());
         return new ReviewInvoiceDetailVO(summary, invoiceService.toAuthorizedReviewVO(invoice),
-                invoice.getInternalNote(), new LinkedHashSet<>(tagMapper.findTagIds(
+                currentFileVO, invoice.getInternalNote(), new LinkedHashSet<>(tagMapper.findTagIds(
                 invoice.getOrganizationId(), invoiceId)), historyRecords(invoiceId));
     }
 
@@ -93,6 +101,14 @@ public class ReviewService {
             throw new BusinessException(BizCode.NO_PERMISSION, HttpStatus.FORBIDDEN);
         }
         return historyRecords(invoiceId);
+    }
+
+    public ReviewStatsVO stats(String projectId) {
+        String cleanedProjectId = clean(projectId);
+        if (cleanedProjectId != null) authorizationService.requireReviewProject(cleanedProjectId);
+        boolean unrestricted = authorizationService.hasPermission("application:review");
+        return reviewMapper.findStats(TenantContext.requireOrganizationId(),
+                TenantContext.requireCasId(), unrestricted, cleanedProjectId);
     }
 
     @Transactional
@@ -289,10 +305,10 @@ public class ReviewService {
 
     private List<ClubReviewVO> historyRecords(String invoiceId) {
         return reviewMapper.findForInvoice(TenantContext.requireOrganizationId(), invoiceId).stream()
-                .map(review -> new ClubReviewVO(review.getId(), review.getInvoiceId(),
-                        review.getReviewerCasId(), review.getAction(), review.getReasonItemId(),
-                        readFields(review.getReturnFieldsJson()), review.getComment(),
-                        review.getBatchOperationId(), review.getCreatedAt())).toList();
+                .map(review -> new ClubReviewVO(review.id(), review.invoiceId(),
+                        review.reviewerCasId(), review.reviewerName(), review.action(), review.reasonItemId(),
+                        readFields(review.returnFieldsJson()), review.comment(),
+                        review.batchOperationId(), review.createdAt())).toList();
     }
 
     private Set<String> readFields(String json) {

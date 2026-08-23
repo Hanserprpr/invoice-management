@@ -168,8 +168,14 @@ public class InvoicePrecheckService {
     private PrecheckResultVO toVO(InvoicePrecheckResult row) {
         return new PrecheckResultVO(row.getId(), row.getInvoiceId(), row.getRuleSetVersionId(),
                 row.getCheckType(), row.getRuleCode(), row.getSeverity(), row.getResult(),
-                row.getReason(), row.getResolution(), row.getResolvedByCasId(),
+                row.getReason(), relatedInvoiceId(row), row.getResolution(), row.getResolvedByCasId(),
                 row.getResolutionComment(), row.getResolvedAt(), row.getCreatedAt());
+    }
+
+    private String relatedInvoiceId(InvoicePrecheckResult row) {
+        return row.getMatchedInvoiceId() != null && row.getEvidenceJson() != null
+                && row.getEvidenceJson().contains("CURRENT_ORGANIZATION")
+                ? row.getMatchedInvoiceId() : null;
     }
 
     private BusinessException notFound() {

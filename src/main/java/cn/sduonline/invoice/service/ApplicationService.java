@@ -27,12 +27,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -323,7 +325,7 @@ public class ApplicationService {
         ApplicationForm form = requireForm(formVersion.getFormId());
         return new ApplicationVO(application.getId(), application.getOrganizationId(), form.getId(),
                 form.getName(), formVersion.getId(), formVersion.getVersionNo(),
-                application.getApplicantCasId(), readTree(application.getAnswersJson()),
+                application.getApplicantCasId(), readAnswers(application.getAnswersJson()),
                 readSchema(formVersion.getSchemaJson()), application.getStatus(),
                 application.getVersion() == null ? 0 : application.getVersion(),
                 application.getSubmittedAt(), application.getCreatedAt(), application.getUpdatedAt());
@@ -348,6 +350,14 @@ public class ApplicationService {
     private JsonNode readTree(String json) {
         try {
             return objectMapper.readTree(json);
+        } catch (JacksonException exception) {
+            throw new BusinessException(BizCode.SYSTEM_ERROR, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    private Map<String, Object> readAnswers(String json) {
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
         } catch (JacksonException exception) {
             throw new BusinessException(BizCode.SYSTEM_ERROR, HttpStatus.INTERNAL_SERVER_ERROR);
         }

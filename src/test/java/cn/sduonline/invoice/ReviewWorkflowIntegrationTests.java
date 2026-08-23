@@ -166,13 +166,22 @@ class ReviewWorkflowIntegrationTests {
                             exception -> assertThat(exception.getBizCode()).isEqualTo(BizCode.NO_PERMISSION));
         }
         try (TenantContext.Scope ignored = TenantContext.open(organization.id(), scopedReviewer)) {
-            assertThat(reviewService.queue(1, 20, projectId, "SUBMITTED", null).records())
+            var queue = reviewService.queue(1, 20, projectId, "SUBMITTED", null);
+            assertThat(queue.records())
                     .extracting("invoiceId").containsExactlyInAnyOrder(invoiceOne, invoiceTwo);
+            assertThat(queue.records()).allSatisfy(item -> {
+                assertThat(item.sellerName()).isEqualTo("测试供应商");
+                assertThat(item.precheckBlockCount()).isZero();
+                assertThat(item.precheckWarningCount()).isZero();
+            });
         }
 
         String returnReasonId = dictionaryItem(organization.id(), "RETURN_REASON", "AMOUNT_MISMATCH");
         String categoryId = dictionaryItem(organization.id(), "EXPENSE_CATEGORY", "TRANSPORT");
         try (TenantContext.Scope ignored = TenantContext.open(organization.id(), reviewer)) {
+            var initialDetail = reviewService.detail(invoiceOne);
+            assertThat(initialDetail.currentFile().originalName()).isEqualTo("review-one.pdf");
+            assertThat(initialDetail.currentFile().contentType()).isEqualTo("application/pdf");
             assertThatThrownBy(() -> reviewService.approve(invoiceOne, reviewer,
                     new ApproveReviewRequest(1L, null, null, null)))
                     .isInstanceOfSatisfying(BusinessException.class,
@@ -231,13 +240,22 @@ class ReviewWorkflowIntegrationTests {
             assertThat(batch.getFirst().invoice().status()).isEqualTo("INTERNALLY_APPROVED");
             assertThat(batch.getFirst().reviews()).extracting("action")
                     .containsExactly("START_REVIEW", "APPROVE");
+            assertThat(batch.getFirst().reviews()).extracting("reviewerName")
+                    .containsOnly("审核人");
             assertThat(batch.getFirst().reviews().getFirst().batchOperationId())
                     .isEqualTo(batch.getFirst().reviews().getLast().batchOperationId());
             assertThat(applicationStatus(applicationId)).isEqualTo("APPROVED");
             assertThatThrownBy(() -> reviewService.start(invoiceOne, reviewer,
                     new StartReviewRequest(4L)))
                     .isInstanceOfSatisfying(BusinessException.class,
-                            exception -> assertThat(exception.getBizCode()).isEqualTo(BizCode.VERSION_CONFLICT));
+                                    exception -> assertThat(exception.getBizCode()).isEqualTo(BizCode.VERSION_CONFLICT));
+            assertThat(reviewService.stats(projectId).internallyApproved()).isEqualTo(2);
+            var projectSummary = projectService.detail(projectId);
+            assertThat(projectSummary.invoiceCount()).isEqualTo(2);
+            assertThat(projectSummary.processedCount()).isEqualTo(2);
+            assertThat(projectSummary.submitterCount()).isEqualTo(1);
+            assertThat(projectSummary.totalAmount()).isEqualByComparingTo("220.00");
+            assertThat(projectSummary.paperTotalCount()).isEqualTo(2);
         }
         try (TenantContext.Scope ignored = TenantContext.open(organization.id(), applicant)) {
             assertThat(reviewService.history(invoiceOne)).extracting("action")
@@ -248,7 +266,7 @@ class ReviewWorkflowIntegrationTests {
         try (TenantContext.Scope ignored = TenantContext.open(organization.id(), reviewer)) {
             var scan = paperService.scan(projectId, reviewer,
                     new PaperScanRequest("invoiceCode=3700&invoiceNumber=R-001"));
-            assertThat(scan.result()).isEqualTo("SUCCESS");
+            assertThat(scan.result()).isEqualTo("RECEIVED");
             assertThat(scan.paperItem().status()).isEqualTo("CLUB_RECEIVED");
             assertThat(paperService.scan(projectId, reviewer,
                     new PaperScanRequest("invoiceCode=3700&invoiceNumber=R-001")).result())
@@ -269,6 +287,7 @@ class ReviewWorkflowIntegrationTests {
                     .findFirst().orElseThrow();
             assertThat(exact.result()).isEqualTo("HIT");
             assertThat(exact.reason()).doesNotContain(invoiceOne);
+            assertThat(exact.relatedInvoiceId()).isEqualTo(invoiceOne);
             precheckService.resolve(duplicateId, exact.id(), reviewer,
                     new ResolvePrecheckRequest("FALSE_POSITIVE", "已核对为测试票据"));
             assertThat(jdbcTemplate.queryForObject("""

@@ -11,6 +11,7 @@ public record PrecheckResultVO(
         String severity,
         String result,
         String reason,
+        String relatedInvoiceId,
         String resolution,
         String resolvedByCasId,
         String resolutionComment,

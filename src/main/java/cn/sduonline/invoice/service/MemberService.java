@@ -34,6 +34,9 @@ import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
 
 @Service
 public class MemberService {
@@ -77,6 +80,12 @@ public class MemberService {
                         .orderByAsc(OrganizationMember::getCasId));
         List<MemberVO> records = result.getRecords().stream().map(this::toVO).toList();
         return new PageResult<>(records, page, pageSize, result.getTotal());
+    }
+
+    public MemberVO detail(String organizationId, String casId) {
+        authorizationService.requireTenantPath(organizationId);
+        authorizationService.requirePermission("member:manage");
+        return toVO(requireMember(organizationId, casId));
     }
 
     @Transactional
@@ -213,10 +222,21 @@ public class MemberService {
 
     private MemberVO toVO(OrganizationMember member) {
         User user = userMapper.selectById(member.getCasId());
+        List<MemberVO.RoleAssignmentVO> assignments = memberRoleQueryMapper
+                .findRoleAssignments(member.getOrganizationId(), member.getId()).stream()
+                .map(row -> new MemberVO.RoleAssignmentVO(
+                        row.code(), row.effectiveFrom(), row.effectiveUntil())).toList();
+        Map<String, Set<String>> grants = new LinkedHashMap<>();
+        projectAccessMapper.findForMember(member.getOrganizationId(), member.getId()).forEach(row ->
+                grants.computeIfAbsent(row.projectId(), ignored -> new LinkedHashSet<>())
+                        .add(row.accessType()));
+        List<MemberVO.ProjectGrantVO> projectGrants = grants.entrySet().stream()
+                .map(entry -> new MemberVO.ProjectGrantVO(entry.getKey(), entry.getValue())).toList();
         return new MemberVO(member.getId(), member.getOrganizationId(), member.getCasId(),
                 user == null ? null : user.getName(), member.getStatus(), member.getTermStart(),
                 member.getTermEnd(), member.getVersion() == null ? 0 : member.getVersion(),
-                memberRoleQueryMapper.findActiveRoleCodes(member.getOrganizationId(), member.getId()));
+                memberRoleQueryMapper.findActiveRoleCodes(member.getOrganizationId(), member.getId()),
+                assignments, projectGrants);
     }
 
     private void validateTerm(LocalDate start, LocalDate end) {

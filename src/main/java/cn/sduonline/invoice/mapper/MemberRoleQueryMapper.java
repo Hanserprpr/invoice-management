@@ -6,9 +6,13 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
+import java.time.Instant;
 
 @Mapper
 public interface MemberRoleQueryMapper {
+    record RoleAssignmentRow(String code, Instant effectiveFrom, Instant effectiveUntil) {
+    }
+
     @InterceptorIgnore(tenantLine = "true")
     @Select("""
             SELECT r.code
@@ -20,4 +24,14 @@ public interface MemberRoleQueryMapper {
             """)
     List<String> findActiveRoleCodes(@Param("organizationId") String organizationId,
                                      @Param("memberId") String memberId);
+
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("""
+            SELECT r.code,mr.effective_from,mr.effective_until
+            FROM organization_member_role mr JOIN role r ON r.id=mr.role_id
+            WHERE mr.organization_id=#{organizationId} AND mr.member_id=#{memberId}
+            ORDER BY r.code
+            """)
+    List<RoleAssignmentRow> findRoleAssignments(@Param("organizationId") String organizationId,
+                                                 @Param("memberId") String memberId);
 }

@@ -193,7 +193,7 @@ public class PaperService {
                 invoiceId, "SUCCESS", "已匹配并登记社团收取");
         PaperItemVO updated = transition(context, item, item.getStatus(), "CLUB_RECEIVED",
                 "SCAN_RECEIVED", null, actorCasId, scanId, item.getVersion());
-        return new PaperScanResultVO(scanId, "SUCCESS", invoiceId, updated);
+        return new PaperScanResultVO(scanId, "RECEIVED", invoiceId, updated);
     }
 
     private PaperItemVO transition(PaperContext context, PaperItem item, String from, String to,
