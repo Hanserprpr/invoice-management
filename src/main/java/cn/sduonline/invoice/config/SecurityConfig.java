@@ -23,6 +23,13 @@ import org.springframework.security.web.authentication.AnonymousAuthenticationFi
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.security.config.Customizer;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 山东大学 OIDC 登录和接口访问控制。
@@ -40,6 +47,27 @@ public class SecurityConfig {
             "https://i.sdu.edu.cn/pass-api/auth/oidc/userinfo";
     private static final String SDU_JWK_SET_URI =
             "https://i.sdu.edu.cn/pass-api/auth/oidc/jwks";
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource(
+            @Value("${app.security.cors.allowed-origins:http://localhost:5715}")
+            List<String> allowedOrigins
+    ) {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(allowedOrigins);
+        configuration.setAllowCredentials(true);
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of(
+                "Content-Type", "X-XSRF-TOKEN", "X-Organization-Id",
+                "Idempotency-Key", "X-Request-Id"
+        ));
+        configuration.setExposedHeaders(List.of("X-Request-Id"));
+        configuration.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
+    }
 
     @Bean
     public ClientRegistrationRepository clientRegistrationRepository(
@@ -73,19 +101,23 @@ public class SecurityConfig {
             TenantContextFilter tenantContextFilter,
             IdempotencyFilter idempotencyFilter,
             ObjectProvider<RedisRateLimitFilter> rateLimitFilter,
-            @Value("${app.security.oidc.success-url}") String successUrl
+            @Value("${app.security.oidc.success-url}") String successUrl,
+            @Value("${springdoc.api-docs.enabled:false}") boolean apiDocsEnabled
     ) throws Exception {
+        List<String> publicPaths = new ArrayList<>(List.of(
+                "/auth/login-url",
+                "/auth/logout/success",
+                "/oauth2/**",
+                "/login/**",
+                "/error",
+                "/actuator/health/liveness",
+                "/actuator/health/readiness"
+        ));
+        if (apiDocsEnabled) publicPaths.addAll(ApiDocPaths.PATTERNS);
         http
+                .cors(Customizer.withDefaults())
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers(
-                                "/auth/login-url",
-                                "/auth/logout/success",
-                                "/oauth2/**",
-                                "/login/**",
-                                "/error",
-                                "/actuator/health/liveness",
-                                "/actuator/health/readiness"
-                        ).permitAll()
+                        .requestMatchers(publicPaths.toArray(String[]::new)).permitAll()
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth2 -> oauth2

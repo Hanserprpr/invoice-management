@@ -23,6 +23,12 @@ server:
       enabled: true
       pattern: '%a %t "%r" %s %D %{X-Request-Id}o'
 
+springdoc:
+  api-docs:
+    enabled: ${API_DOCS_ENABLED:false}
+  swagger-ui:
+    enabled: ${API_DOCS_ENABLED:false}
+
 app:
   rate-limit:
     enabled: true

@@ -7,11 +7,12 @@
 使用 `prod` Profile 启动。应用会在启动后拒绝测试库、本机数据库、占位密钥、未启用 R2 或未启用 Redis 限流。生产必须从密钥管理服务注入：
 
 - MySQL：`MYSQL_URL`、`MYSQL_USERNAME`、`MYSQL_PASSWORD`；
-- Redis：`SPRING_DATA_REDIS_URL`，用于跨实例 Session 和限流；
+- Redis：用于跨实例 Session 和限流，二选一——整串 `SPRING_DATA_REDIS_URL`（`redis://` 或 `rediss://`），或拆分的 `SPRING_DATA_REDIS_HOST`、`SPRING_DATA_REDIS_PORT`、`SPRING_DATA_REDIS_PASSWORD`、`SPRING_DATA_REDIS_DATABASE`（密码含 `@ [ / ; ,` 等特殊字符时用这种，免去 URL 编码）；
 - OIDC：`SDU_OIDC_CLIENT_ID`、`SDU_OIDC_CLIENT_SECRET`；
 - R2：`R2_ENABLED=true`、账号、Access Key、Secret 和私有桶名；
 - ClamAV、OCR、通知投递按试点决定启用，未启用时必须保留人工闭环；
-- `RATE_LIMIT_ENABLED=true`，按容量测试调整窗口和额度。
+- `RATE_LIMIT_ENABLED=true`，按容量测试调整窗口和额度；
+- `API_DOCS_ENABLED`：Swagger UI 与 OpenAPI 描述开关，生产默认 `false`，仅排障时临时开启并及时改回。
 
 外部入口只允许 HTTPS。反向代理仅从受控代理写入转发头；R2 桶禁止公共访问，CORS 只允许正式前端域名和必要方法。Actuator 只公开不含详情的存活/就绪探针；Prometheus 端点须由内网或网关认证保护。
 

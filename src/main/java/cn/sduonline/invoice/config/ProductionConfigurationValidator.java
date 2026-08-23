@@ -31,7 +31,7 @@ public class ProductionConfigurationValidator implements ApplicationRunner {
         requireSecret("MYSQL_USERNAME", errors);
         requireSecret("MYSQL_PASSWORD", errors);
         requireUrl("MYSQL_URL", List.of("jdbc:mysql://"), errors);
-        requireUrl("SPRING_DATA_REDIS_URL", List.of("redis://", "rediss://"), errors);
+        requireRedis(errors);
         requireTrue("R2_ENABLED", errors);
         requireTrue("RATE_LIMIT_ENABLED", errors);
         rejectTestDatabase(errors);
@@ -57,6 +57,35 @@ public class ProductionConfigurationValidator implements ApplicationRunner {
             }
         } catch (RuntimeException exception) {
             errors.add(name + " invalid");
+        }
+    }
+
+    /**
+     * Redis 允许两种等价配置：整串 URL，或拆分的 host/port（密码含特殊字符时免去 URL 编码）。
+     */
+    private void requireRedis(List<String> errors) {
+        String url = environment.getProperty("SPRING_DATA_REDIS_URL");
+        if (url != null && !url.isBlank()) {
+            requireUrl("SPRING_DATA_REDIS_URL", List.of("redis://", "rediss://"), errors);
+            return;
+        }
+        String host = environment.getProperty("SPRING_DATA_REDIS_HOST");
+        if (host == null || host.isBlank() || isPlaceholder(host)) {
+            errors.add("SPRING_DATA_REDIS_URL or SPRING_DATA_REDIS_HOST missing");
+            return;
+        }
+        String port = environment.getProperty("SPRING_DATA_REDIS_PORT");
+        if (port != null && !port.isBlank() && !isValidPort(port)) {
+            errors.add("SPRING_DATA_REDIS_PORT invalid");
+        }
+    }
+
+    private boolean isValidPort(String port) {
+        try {
+            int value = Integer.parseInt(port.trim());
+            return value > 0 && value <= 65535;
+        } catch (NumberFormatException exception) {
+            return false;
         }
     }
 

@@ -39,6 +39,44 @@ class ProductionConfigurationValidatorTests {
         assertThatCode(() -> validator(environment).run(args())).doesNotThrowAnyException();
     }
 
+    @Test
+    void acceptsSplitRedisHostConfiguration() {
+        MockEnvironment environment = completeSettings()
+                .withProperty("SPRING_DATA_REDIS_HOST", "redis.internal")
+                .withProperty("SPRING_DATA_REDIS_PORT", "6379")
+                .withProperty("SPRING_DATA_REDIS_PASSWORD", "strong-redis-value");
+        assertThatCode(() -> validator(environment).run(args())).doesNotThrowAnyException();
+    }
+
+    @Test
+    void rejectsMissingRedisAndInvalidRedisPort() {
+        assertThatThrownBy(() -> validator(completeSettings()).run(args()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("SPRING_DATA_REDIS_URL or SPRING_DATA_REDIS_HOST missing");
+
+        MockEnvironment badPort = completeSettings()
+                .withProperty("SPRING_DATA_REDIS_HOST", "redis.internal")
+                .withProperty("SPRING_DATA_REDIS_PORT", "70000");
+        assertThatThrownBy(() -> validator(badPort).run(args()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("SPRING_DATA_REDIS_PORT invalid");
+    }
+
+    private MockEnvironment completeSettings() {
+        return new MockEnvironment()
+                .withProperty("SDU_OIDC_CLIENT_ID", "sdu-client")
+                .withProperty("SDU_OIDC_CLIENT_SECRET", "strong-oidc-value")
+                .withProperty("R2_ACCOUNT_ID", "account-id")
+                .withProperty("R2_ACCESS_KEY_ID", "access-id")
+                .withProperty("R2_SECRET_ACCESS_KEY", "strong-r2-value")
+                .withProperty("R2_BUCKET", "invoice-private")
+                .withProperty("MYSQL_USERNAME", "invoice_app")
+                .withProperty("MYSQL_PASSWORD", "strong-db-value")
+                .withProperty("MYSQL_URL", "jdbc:mysql://mysql.internal/invoice_management")
+                .withProperty("R2_ENABLED", "true")
+                .withProperty("RATE_LIMIT_ENABLED", "true");
+    }
+
     private ProductionConfigurationValidator validator(MockEnvironment environment) {
         return new ProductionConfigurationValidator(environment);
     }

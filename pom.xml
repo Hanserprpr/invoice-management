@@ -32,6 +32,8 @@
         <aws-sdk.version>2.31.77</aws-sdk.version>
         <poi.version>5.4.1</poi.version>
         <pdfbox.version>3.0.5</pdfbox.version>
+        <springdoc.version>3.1.0</springdoc.version>
+        <therapi.version>0.15.0</therapi.version>
     </properties>
     <dependencies>
         <dependency>
@@ -63,6 +65,17 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc.version}</version>
+        </dependency>
+        <!-- 让 springdoc 把控制器和 DTO 的 Javadoc 作为接口说明写进 OpenAPI。 -->
+        <dependency>
+            <groupId>com.github.therapi</groupId>
+            <artifactId>therapi-runtime-javadoc</artifactId>
+            <version>${therapi.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.session</groupId>
@@ -159,6 +172,11 @@
                                 <path>
                                     <groupId>org.projectlombok</groupId>
                                     <artifactId>lombok</artifactId>
+                                </path>
+                                <path>
+                                    <groupId>com.github.therapi</groupId>
+                                    <artifactId>therapi-runtime-javadoc-scribe</artifactId>
+                                    <version>${therapi.version}</version>
                                 </path>
                             </annotationProcessorPaths>
                         </configuration>

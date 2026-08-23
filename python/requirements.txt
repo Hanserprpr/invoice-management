@@ -1,0 +1,15 @@
+# FastAPI 和 ASGI 服務器
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# OCR 和圖像處理
+rapidocr-onnxruntime==1.3.24
+opencv-python==4.8.1.78
+pymupdf==1.28.0
+Pillow==10.1.0
+
+# 二維碼解碼
+pyzbar==0.1.9
+
+# 其它依賴
+numpy==1.26.4

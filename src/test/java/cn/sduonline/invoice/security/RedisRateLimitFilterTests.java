@@ -56,6 +56,23 @@ class RedisRateLimitFilterTests {
         verify(writer).write(eq(response), eq(503), eq(BizCode.THIRD_PARTY_UNAVAILABLE));
     }
 
+    @Test
+    void countsProxyPrefixedWriteRequestsAgainstTheSameRoute() throws Exception {
+        StringRedisTemplate redis = mock(StringRedisTemplate.class);
+        SecurityErrorWriter writer = mock(SecurityErrorWriter.class);
+        when(redis.execute(any(RedisScript.class), anyList(), any())).thenReturn(61L);
+        RedisRateLimitFilter filter = new RedisRateLimitFilter(redis, properties(), writer);
+
+        MockHttpServletRequest proxied = new MockHttpServletRequest("POST", "/invoice/api/files/uploads");
+        proxied.setContextPath("/invoice");
+        proxied.setRequestURI("/invoice/api/files/uploads");
+        proxied.setRemoteAddr("192.0.2.10");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(proxied, response, new MockFilterChain());
+
+        verify(writer).write(eq(response), eq(429), eq(BizCode.TOO_MANY_REQUESTS));
+    }
+
     private RateLimitProperties properties() {
         RateLimitProperties properties = new RateLimitProperties();
         properties.setRequests(60);

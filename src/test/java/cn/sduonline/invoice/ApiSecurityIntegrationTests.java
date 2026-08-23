@@ -66,6 +66,17 @@ class ApiSecurityIntegrationTests {
     }
 
     @Test
+    void apiDocsAreAnonymousWhenEnabledAndDescribeBusinessEndpoints() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.openapi").exists())
+                .andExpect(jsonPath("$.paths['/auth/me']").exists());
+
+        mockMvc.perform(get("/swagger-ui/index.html"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void frameworkRoutingErrorsUseStableBusinessCodes() throws Exception {
         mockMvc.perform(get("/auth/does-not-exist").with(user("routing-test")))
                 .andExpect(status().isNotFound())

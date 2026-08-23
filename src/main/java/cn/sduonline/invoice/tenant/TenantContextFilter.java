@@ -1,8 +1,10 @@
 package cn.sduonline.invoice.tenant;
 
+import cn.sduonline.invoice.config.ApiDocPaths;
 import cn.sduonline.invoice.service.TenantAccessService;
 import cn.sduonline.invoice.data.enums.BizCode;
 import cn.sduonline.invoice.security.SecurityErrorWriter;
+import cn.sduonline.invoice.util.RequestPaths;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -35,13 +37,14 @@ public class TenantContextFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getRequestURI();
+        String path = RequestPaths.applicationPath(request);
         return "OPTIONS".equalsIgnoreCase(request.getMethod())
                 || path.equals("/error")
                 || path.startsWith("/auth")
                 || path.startsWith("/oauth2/")
                 || path.startsWith("/login/")
                 || path.startsWith("/actuator/")
+                || ApiDocPaths.matches(path)
                 || path.startsWith("/api/platform/")
                 || path.equals("/api/organizations");
     }

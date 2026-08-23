@@ -1,0 +1,41 @@
+[Unit]
+Description=发票管理平台
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=invoice
+Group=invoice
+WorkingDirectory=/opt/invoice-management
+
+# 环境变量文件，权限必须是 600、属主 root
+EnvironmentFile=/etc/invoice-management.env
+
+# JAVA_OPTS 从 env 文件读取；如未设置则使用下面的默认
+ExecStart=/bin/sh -c '/usr/bin/java $JAVA_OPTS -jar /data/invoice/invoice-management-0.0.1-SNAPSHOT.jar'
+
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+
+# 日志走 journald：journalctl -u invoice-management -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=invoice-management
+
+# 安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/invoice-management/logs /tmp
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

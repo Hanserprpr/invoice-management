@@ -1,0 +1,41 @@
+[Unit]
+Description=Invoice OCR Recognition Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+User=ocr
+Group=ocr
+
+WorkingDirectory=/data/invoice/app
+
+EnvironmentFile=/etc/invoice-ocr.env
+
+ExecStart=/data/invoice/.venv/bin/python /data/invoice/app/app.py
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillMode=process
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=invoice-ocr
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+ReadWritePaths=/tmp /var/tmp
+
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

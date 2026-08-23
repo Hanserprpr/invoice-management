@@ -24,6 +24,15 @@ public class AuthController {
 
     /**
      * 获取统一身份认证的登录入口。
+     *
+     * <p>返回山东大学统一身份认证的跳转地址，前端在未登录或会话失效时把浏览器导向该地址完成 OIDC 登录。
+     *
+     * <ul>
+     *   <li>权限：允许匿名访问。</li>
+     *   <li>请求头：不需要 `X-Organization-Id`。</li>
+     *   <li>成功：`200`，`data.url` 为 `/oauth2/authorization/sdu`；部署在反向代理路径前缀下时需自行拼接前缀。</li>
+     *   <li>备注：登录成功后服务端重定向到 `app.security.oidc.success-url`，会话凭证是 `SESSION` Cookie。</li>
+     * </ul>
      */
     @GetMapping("/login-url")
     public Result<Map<String, String>> loginUrl() {
@@ -32,6 +41,15 @@ public class AuthController {
 
     /**
      * 获取当前已登录用户的身份与权限信息。
+     *
+     * <p>同时映射 `/auth/me` 与 `/auth/login/success`，返回当前会话对应的学号、姓名和是否平台管理员，供前端初始化。
+     *
+     * <ul>
+     *   <li>权限：任意已登录用户。</li>
+     *   <li>请求头：不需要 `X-Organization-Id`；社团列表请另行调用 `GET /api/organizations`。</li>
+     *   <li>成功：`200`，`data` 为 `{casId, name, platformAdmin}`。</li>
+     *   <li>常见错误：`20000` 未登录；`20001` 登录状态已失效。</li>
+     * </ul>
      */
     @GetMapping({"/me", "/login/success"})
     public Result<CurrentUserVO> currentUser(
@@ -45,6 +63,14 @@ public class AuthController {
 
     /**
      * 处理退出登录成功后的响应。
+     *
+     * <p>Spring Security 注销成功后的落地地址，返回统一响应体而不是重定向到页面。
+     *
+     * <ul>
+     *   <li>权限：允许匿名访问。</li>
+     *   <li>成功：`200`，`data` 为空。</li>
+     *   <li>备注：注销动作本身是 `POST /logout`，由 Spring Security 处理，需要携带 CSRF 头。</li>
+     * </ul>
      */
     @GetMapping("/logout/success")
     public Result<Void> logoutSuccess() {

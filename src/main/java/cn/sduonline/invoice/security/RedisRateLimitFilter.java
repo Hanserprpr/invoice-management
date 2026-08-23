@@ -2,6 +2,7 @@ package cn.sduonline.invoice.security;
 
 import cn.sduonline.invoice.config.RateLimitProperties;
 import cn.sduonline.invoice.data.enums.BizCode;
+import cn.sduonline.invoice.util.RequestPaths;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -47,7 +48,7 @@ public class RedisRateLimitFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getRequestURI();
+        String path = RequestPaths.applicationPath(request);
         if (path.startsWith("/actuator/")) return true;
         if (path.equals("/auth/login-url") || path.startsWith("/oauth2/")
                 || path.startsWith("/login/oauth2/")) return false;
@@ -64,7 +65,7 @@ public class RedisRateLimitFilter extends OncePerRequestFilter {
         Duration window = properties.getWindow();
         String identity = request.getSession(false) == null
                 ? request.getRemoteAddr() : request.getSession(false).getId();
-        String bucket = request.getMethod() + ":" + routeBucket(request.getRequestURI());
+        String bucket = request.getMethod() + ":" + routeBucket(RequestPaths.applicationPath(request));
         String key = "invoice-management:rate:" + hash(identity) + ":" + hash(bucket);
         try {
             Long count = redis.execute(SCRIPT, List.of(key), Long.toString(window.toMillis()));

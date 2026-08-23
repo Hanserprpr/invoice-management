@@ -1,5 +1,9 @@
 HELP.md
 target/
+
+# 部署产物 & 本地 env
+deploy/*.env
+!deploy/*.env.example
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
