@@ -105,13 +105,13 @@ public class SecurityConfig {
             @Value("${springdoc.api-docs.enabled:false}") boolean apiDocsEnabled
     ) throws Exception {
         List<String> publicPaths = new ArrayList<>(List.of(
-                "/auth/login-url",
-                "/auth/logout/success",
-                "/oauth2/**",
-                "/login/**",
-                "/error",
-                "/actuator/health/liveness",
-                "/actuator/health/readiness"
+                "/api/auth/login-url",
+                "/api/auth/logout/success",
+                "/api/oauth2/**",
+                "/api/login/**",
+                "/api/error",
+                "/api/actuator/health/liveness",
+                "/api/actuator/health/readiness"
         ));
         if (apiDocsEnabled) publicPaths.addAll(ApiDocPaths.PATTERNS);
         http
@@ -121,6 +121,11 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth2 -> oauth2
+                        .loginPage("/api/oauth2/authorization/sdu")
+                        .authorizationEndpoint(endpoint ->
+                                endpoint.baseUri("/api/oauth2/authorization"))
+                        .redirectionEndpoint(endpoint ->
+                                endpoint.baseUri("/api/login/oauth2/code/*"))
                         .userInfoEndpoint(userInfo ->
                                 userInfo.oidcUserService(sduOidcUserService))
                         .successHandler((request, response, authentication) ->
@@ -140,7 +145,8 @@ public class SecurityConfig {
                         .accessDeniedHandler(securityErrorWriter)
                 )
                 .logout(logout -> logout
-                        .logoutSuccessUrl("/auth/logout/success")
+                        .logoutUrl("/api/logout")
+                        .logoutSuccessUrl("/api/auth/logout/success")
                 );
         rateLimitFilter.ifAvailable(filter -> http.addFilterBefore(filter,
                 OAuth2AuthorizationRequestRedirectFilter.class));

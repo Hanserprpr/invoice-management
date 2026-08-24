@@ -8,10 +8,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RequestPathsTests {
     @Test
     void stripsProxyPrefixAndKeepsPlainPathsUnchanged() {
-        assertThat(RequestPaths.applicationPath(request("", "/actuator/health/liveness")))
-                .isEqualTo("/actuator/health/liveness");
-        assertThat(RequestPaths.applicationPath(request("/invoice", "/invoice/actuator/health/liveness")))
-                .isEqualTo("/actuator/health/liveness");
+        assertThat(RequestPaths.applicationPath(request("", "/api/actuator/health/liveness")))
+                .isEqualTo("/api/actuator/health/liveness");
+        assertThat(RequestPaths.applicationPath(request("/invoice", "/invoice/api/actuator/health/liveness")))
+                .isEqualTo("/api/actuator/health/liveness");
         assertThat(RequestPaths.applicationPath(request("/invoice", "/invoice")))
                 .isEqualTo("/");
         assertThat(RequestPaths.applicationPath(request("/invoice", "/other/path")))

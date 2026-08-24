@@ -39,11 +39,12 @@ public class TenantContextFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = RequestPaths.applicationPath(request);
         return "OPTIONS".equalsIgnoreCase(request.getMethod())
-                || path.equals("/error")
-                || path.startsWith("/auth")
-                || path.startsWith("/oauth2/")
-                || path.startsWith("/login/")
-                || path.startsWith("/actuator/")
+                || path.equals("/api/error")
+                || path.startsWith("/api/auth")
+                || path.startsWith("/api/oauth2/")
+                || path.startsWith("/api/login/")
+                || path.equals("/api/logout")
+                || path.startsWith("/api/actuator/")
                 || ApiDocPaths.matches(path)
                 || path.startsWith("/api/platform/")
                 || path.equals("/api/organizations");

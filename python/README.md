@@ -42,7 +42,7 @@ curl -X POST \
   -H "Authorization: Bearer CHANGE_ME" \
   -H "Content-Type: application/pdf" \
   --data-binary @sample.pdf \
-  http://127.0.0.1:9000/recognize
+  http://127.0.0.1:9000/api/recognize
 ```
 
 返回格式：
@@ -82,12 +82,12 @@ sudo cp invoice-ocr.service /etc/systemd/system/
 sudo systemctl enable --now invoice-ocr
 
 # 5. 驗證
-curl http://127.0.0.1:9000/health
+curl http://127.0.0.1:9000/api/health
 ```
 
 ## API 端點
 
-### `GET /health`
+### `GET /api/health`
 健康檢查（存活探針）。
 
 **響應**：
@@ -95,7 +95,7 @@ curl http://127.0.0.1:9000/health
 {"status": "ok"}
 ```
 
-### `POST /recognize`
+### `POST /api/recognize`
 發票識別主接口。
 
 **請求頭**：
@@ -133,7 +133,7 @@ curl http://127.0.0.1:9000/health
 
 ```
 OCR_ENABLED=true
-OCR_ENDPOINT=http://127.0.0.1:9000/recognize
+OCR_ENDPOINT=http://127.0.0.1:9000/api/recognize
 OCR_API_KEY=xxx  # 與 /etc/invoice-ocr.env 的 OCR_API_KEY 相同
 OCR_TIMEOUT=30s
 OCR_WORKER_ENABLED=true

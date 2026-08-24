@@ -46,17 +46,17 @@ MYSQL_USERNAME=root MYSQL_PASSWORD=invoice_dev ./mvnw test
 
 ## 接口文档（Swagger UI）
 
-本地启动后访问 `http://localhost:8080/swagger-ui.html`，OpenAPI 描述位于 `/v3/api-docs`（YAML 为 `/v3/api-docs.yaml`）。
+本地启动后访问 `http://localhost:8080/api/swagger-ui.html`，OpenAPI 描述位于 `/api/v3/api-docs`（YAML 为 `/api/v3/api-docs.yaml`）。
 
-部署在带路径前缀的反向代理后（如 `https://i.sdu.edu.cn/invoice`），用 `API_DOCS_EXTERNAL_PREFIX=/invoice` 让页面按外部路径去取文档，必要时再用 `API_DOCS_OAUTH2_REDIRECT_URL` 指定完整回调地址；本地直连时两者留空即可。代理需下发 `X-Forwarded-Prefix`，`/swagger-ui.html` 的跳转才会落在前缀内。
+部署在带路径前缀的反向代理后（如 `https://i.sdu.edu.cn/invoice`），用 `API_DOCS_EXTERNAL_PREFIX=/invoice` 让页面按外部路径去取文档，必要时再用 `API_DOCS_OAUTH2_REDIRECT_URL` 指定完整回调地址；本地直连时两者留空即可。代理需下发 `X-Forwarded-Prefix`，`/api/swagger-ui.html` 的跳转才会落在前缀内。
 
 Swagger UI 上每个接口的摘要和详细说明直接来自控制器方法的 Javadoc：首句作为 summary，其余段落作为 description。这依赖 `therapi-runtime-javadoc` 注解处理器在编译期把注释写进 `*__Javadoc.json`，所以改完注释要重新 `compile` 才会在文档里生效。
 
-文档路径由 `API_DOCS_ENABLED` 控制：开发默认 `true` 且允许匿名访问，生产 profile 默认 `false`，关闭后这些路径不再放行。接口本身仍需登录，先在浏览器完成 `GET /oauth2/authorization/sdu` 登录再回到 Swagger UI 调试；写操作的 CSRF 头由 Swagger UI 自动从 `XSRF-TOKEN` Cookie 读取并附带。需要租户上下文的接口记得填写 `X-Organization-Id` 请求头。
+文档路径由 `API_DOCS_ENABLED` 控制：开发默认 `true` 且允许匿名访问，生产 profile 默认 `false`，关闭后这些路径不再放行。接口本身仍需登录，先在浏览器完成 `GET /api/oauth2/authorization/sdu` 登录再回到 Swagger UI 调试；写操作的 CSRF 头由 Swagger UI 自动从 `XSRF-TOKEN` Cookie 读取并附带。需要租户上下文的接口记得填写 `X-Organization-Id` 请求头。
 
 ## API 约定
 
-- 当前用户：`GET /auth/me`
+- 当前用户：`GET /api/auth/me`
 - 当前用户社团：`GET /api/organizations`
 - 社团详情：`GET /api/organizations/{id}`
 - 成员列表和新增：`GET|POST /api/organizations/{id}/members`

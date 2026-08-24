@@ -16,15 +16,15 @@ spring:
 springdoc:
   api-docs:
     enabled: ${API_DOCS_ENABLED:true}
-    path: /v3/api-docs
+    path: /api/v3/api-docs
   swagger-ui:
     enabled: ${API_DOCS_ENABLED:true}
-    path: /swagger-ui.html
+    path: /api/swagger-ui.html
     # 反向代理带路径前缀时（如 https://i.sdu.edu.cn/invoice），用 API_DOCS_EXTERNAL_PREFIX=/invoice
     # 告诉页面到外部路径去取文档；默认为空，本地直连不受影响
-    url: ${API_DOCS_EXTERNAL_PREFIX:}/v3/api-docs
-    config-url: ${API_DOCS_EXTERNAL_PREFIX:}/v3/api-docs/swagger-config
-    oauth2-redirect-url: ${API_DOCS_OAUTH2_REDIRECT_URL:${API_DOCS_EXTERNAL_PREFIX:}/swagger-ui/oauth2-redirect.html}
+    url: ${API_DOCS_EXTERNAL_PREFIX:}/api/v3/api-docs
+    config-url: ${API_DOCS_EXTERNAL_PREFIX:}/api/v3/api-docs/swagger-config
+    oauth2-redirect-url: ${API_DOCS_OAUTH2_REDIRECT_URL:${API_DOCS_EXTERNAL_PREFIX:}/api/swagger-ui/oauth2-redirect.html}
     operations-sorter: method
     tags-sorter: alpha
     display-request-duration: true
@@ -38,6 +38,8 @@ mybatis-plus:
 
 server:
   forward-headers-strategy: framework
+  error:
+    path: /api/error
   tomcat:
     connection-timeout: ${SERVER_CONNECTION_TIMEOUT:10s}
   servlet:
@@ -50,6 +52,7 @@ server:
 management:
   endpoints:
     web:
+      base-path: /api/actuator
       exposure:
         include: health,info,prometheus
   endpoint:
@@ -126,5 +129,5 @@ app:
     oidc:
       client-id: ${SDU_OIDC_CLIENT_ID}
       client-secret: ${SDU_OIDC_CLIENT_SECRET}
-      redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
-      success-url: ${OIDC_LOGIN_SUCCESS_URL:/auth/login/success}
+      redirect-uri: "{baseUrl}/api/login/oauth2/code/{registrationId}"
+      success-url: ${OIDC_LOGIN_SUCCESS_URL:/api/auth/login/success}

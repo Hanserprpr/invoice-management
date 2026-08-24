@@ -100,7 +100,7 @@ sudo journalctl -u invoice-ocr -f
 ### 6. 驗證服務
 ```bash
 # 本機測試（健康檢查）
-curl http://127.0.0.1:9000/health
+curl http://127.0.0.1:9000/api/health
 # 輸出：{"status":"ok"}
 
 # 測試識別（需要真實發票文件）
@@ -108,7 +108,7 @@ curl -X POST \
   -H "Authorization: Bearer WIKqE9YU2bZlh9gZjZrHvR5v3NjM7L4xPqWxYzZ1234" \
   -H "Content-Type: application/pdf" \
   --data-binary @invoice.pdf \
-  http://127.0.0.1:9000/recognize
+  http://127.0.0.1:9000/api/recognize
 ```
 
 ## 與 Java 後端整合
@@ -117,7 +117,7 @@ curl -X POST \
 在 `/etc/invoice-management.env` 中設置：
 ```
 OCR_ENABLED=true
-OCR_ENDPOINT=http://127.0.0.1:9000/recognize
+OCR_ENDPOINT=http://127.0.0.1:9000/api/recognize
 OCR_API_KEY=WIKqE9YU2bZlh9gZjZrHvR5v3NjM7L4xPqWxYzZ1234
 OCR_TIMEOUT=30s
 OCR_WORKER_ENABLED=true
@@ -125,21 +125,21 @@ OCR_POLL_INTERVAL=5s
 ```
 
 **同步要點**：
-- `OCR_ENDPOINT`：指向 OCR 服務 URL（本機用 `http://127.0.0.1:9000`，遠程用實際 IP）
+- `OCR_ENDPOINT`：指向 OCR 識別接口（本機用 `http://127.0.0.1:9000/api/recognize`，遠程用實際 IP 和同一路徑）
 - `OCR_API_KEY`：完全相同的密鑰字符串
 - 如 OCR 和 Java 後端在不同機器，確保網絡連通（防火牆開放 9000 端口）
 
 ### 生產環境注意事項
 - **Nginx 反代**（推薦）：在 Nginx 後面代理 OCR 服務，對 Java 後端隱藏真實 IP
   ```nginx
-  location /ocr {
-      proxy_pass http://127.0.0.1:9000;
+  location = /api/ocr {
+      proxy_pass http://127.0.0.1:9000/api/recognize;
       proxy_set_header Authorization $http_authorization;
       proxy_pass_header Content-Type;
       client_max_body_size 50m;
   }
   ```
-  此時 Java 配置 `OCR_ENDPOINT=http://nginx-internal-ip/ocr`
+  此時 Java 配置 `OCR_ENDPOINT=http://nginx-internal-ip/api/ocr`
 
 - **Rate Limit**：OCR 服務本身單線程處理（RapidOCR 占用 CPU），多個並發識別請求會排隊
   - 建議在 Nginx 層配置 `limit_req`
@@ -151,7 +151,7 @@ OCR_POLL_INTERVAL=5s
   sudo journalctl -u invoice-ocr -n 100 --no-pager
   ```
 
-- **監控**：推薦監控 `/health` 端點和 OCR service 進程狀態
+- **監控**：推薦監控 `/api/health` 端點和 OCR service 進程狀態
 
 ## 故障排查
 

@@ -46,14 +46,14 @@ class ApiSecurityIntegrationTests {
 
     @Test
     void currentUserRequiresAuthentication() throws Exception {
-        mockMvc.perform(get("/auth/me"))
+        mockMvc.perform(get("/api/auth/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value(20000));
     }
 
     @Test
     void csrfEndpointReturnsTokenForAuthenticatedSession() throws Exception {
-        mockMvc.perform(get("/auth/csrf").with(user("csrf-user")))
+        mockMvc.perform(get("/api/auth/csrf").with(user("csrf-user")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.token").isNotEmpty())
@@ -63,13 +63,13 @@ class ApiSecurityIntegrationTests {
 
     @Test
     void healthProbeIsAnonymousAndEveryResponseHasSafeRequestId() throws Exception {
-        mockMvc.perform(get("/actuator/health/liveness")
+        mockMvc.perform(get("/api/actuator/health/liveness")
                         .header("X-Request-Id", "d5-health-check"))
                 .andExpect(status().isOk())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
                         .header().string("X-Request-Id", "d5-health-check"));
 
-        mockMvc.perform(get("/auth/me").header("X-Request-Id", "unsafe request id\n"))
+        mockMvc.perform(get("/api/auth/me").header("X-Request-Id", "unsafe request id\n"))
                 .andExpect(status().isBadRequest())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
                         .header().exists("X-Request-Id"));
@@ -77,11 +77,11 @@ class ApiSecurityIntegrationTests {
 
     @Test
     void apiDocsAreAnonymousWhenEnabledAndDescribeBusinessEndpoints() throws Exception {
-        mockMvc.perform(get("/v3/api-docs"))
+        mockMvc.perform(get("/api/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.openapi").exists())
-                .andExpect(jsonPath("$.paths['/auth/me']").exists())
-                .andExpect(jsonPath("$.paths['/auth/csrf'].get").exists())
+                .andExpect(jsonPath("$.paths['/api/auth/me']").exists())
+                .andExpect(jsonPath("$.paths['/api/auth/csrf'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/dictionaries/{dictionaryCode}/items'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/organizations/{organizationId}/members/{casId}'].get").exists())
                 .andExpect(jsonPath("$.paths['/api/platform/organizations'].get").exists())
@@ -92,17 +92,17 @@ class ApiSecurityIntegrationTests {
                 .andExpect(jsonPath("$.components.schemas.ApplicationVO.properties.answers.properties")
                         .doesNotExist());
 
-        mockMvc.perform(get("/swagger-ui/index.html"))
+        mockMvc.perform(get("/api/swagger-ui/index.html"))
                 .andExpect(status().isOk());
     }
 
     @Test
     void frameworkRoutingErrorsUseStableBusinessCodes() throws Exception {
-        mockMvc.perform(get("/auth/does-not-exist").with(user("routing-test")))
+        mockMvc.perform(get("/api/auth/does-not-exist").with(user("routing-test")))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(10003));
 
-        mockMvc.perform(post("/auth/login-url").with(csrf()))
+        mockMvc.perform(post("/api/auth/login-url").with(csrf()))
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(jsonPath("$.code").value(10002));
     }

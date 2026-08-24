@@ -25,7 +25,7 @@ public class OpenApiConfig {
                         .title("社团发票收集管理辅助工具 API")
                         .version("v3.0")
                         .description("""
-                                接口调用需先通过山东大学统一身份认证登录（GET /oauth2/authorization/sdu），\
+                                接口调用需先通过山东大学统一身份认证登录（GET /api/oauth2/authorization/sdu），\
                                 浏览器会话 Cookie 即为凭证；写操作需要携带 CSRF 头 X-XSRF-TOKEN。"""))
                 .components(new Components().addSecuritySchemes(SESSION_COOKIE_SCHEME,
                         new SecurityScheme()

@@ -15,7 +15,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 
 import java.util.Map;
 
-@RequestMapping("/auth")
+@RequestMapping("/api/auth")
 @RestController
 public class AuthController {
 
@@ -33,13 +33,13 @@ public class AuthController {
      * <ul>
      *   <li>权限：允许匿名访问。</li>
      *   <li>请求头：不需要 `X-Organization-Id`。</li>
-     *   <li>成功：`200`，`data.url` 为 `/oauth2/authorization/sdu`；部署在反向代理路径前缀下时需自行拼接前缀。</li>
+     *   <li>成功：`200`，`data.url` 为 `/api/oauth2/authorization/sdu`；部署在反向代理路径前缀下时需自行拼接前缀。</li>
      *   <li>备注：登录成功后服务端重定向到 `app.security.oidc.success-url`，会话凭证是 `SESSION` Cookie。</li>
      * </ul>
      */
     @GetMapping("/login-url")
     public Result<Map<String, String>> loginUrl() {
-        return Result.ok(Map.of("url", "/oauth2/authorization/sdu"));
+        return Result.ok(Map.of("url", "/api/oauth2/authorization/sdu"));
     }
 
     /**
@@ -63,7 +63,7 @@ public class AuthController {
     /**
      * 获取当前已登录用户的身份与权限信息。
      *
-     * <p>同时映射 `/auth/me` 与 `/auth/login/success`，返回当前会话对应的学号、姓名和是否平台管理员，供前端初始化。
+     * <p>同时映射 `/api/auth/me` 与 `/api/auth/login/success`，返回当前会话对应的学号、姓名和是否平台管理员，供前端初始化。
      *
      * <ul>
      *   <li>权限：任意已登录用户。</li>
@@ -90,7 +90,7 @@ public class AuthController {
      * <ul>
      *   <li>权限：允许匿名访问。</li>
      *   <li>成功：`200`，`data` 为空。</li>
-     *   <li>备注：注销动作本身是 `POST /logout`，由 Spring Security 处理，需要携带 CSRF 头。</li>
+     *   <li>备注：注销动作本身是 `POST /api/logout`，由 Spring Security 处理，需要携带 CSRF 头。</li>
      * </ul>
      */
     @GetMapping("/logout/success")

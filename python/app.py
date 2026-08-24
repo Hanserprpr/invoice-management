@@ -23,7 +23,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Invoice OCR Service", version="1.0.0")
+app = FastAPI(
+    title="Invoice OCR Service",
+    version="1.0.0",
+    openapi_url="/api/openapi.json",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+)
 
 # 期望的 API Key（從環境變量讀，簡單示例）
 EXPECTED_API_KEY = "CHANGE_ME"  # 實際部署時從 env 讀
@@ -64,7 +70,7 @@ def get_file_suffix(content_type: str) -> str:
 # 健康檢查
 # ============================================================
 
-@app.get("/health")
+@app.get("/api/health")
 async def health():
     """存活探針"""
     return {"status": "ok"}
@@ -74,7 +80,7 @@ async def health():
 # 主要識別接口
 # ============================================================
 
-@app.post("/recognize")
+@app.post("/api/recognize")
 async def recognize(
     request: Request,
     authorization: Optional[str] = Header(None),

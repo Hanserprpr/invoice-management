@@ -49,9 +49,9 @@ public class RedisRateLimitFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = RequestPaths.applicationPath(request);
-        if (path.startsWith("/actuator/")) return true;
-        if (path.equals("/auth/login-url") || path.startsWith("/oauth2/")
-                || path.startsWith("/login/oauth2/")) return false;
+        if (path.startsWith("/api/actuator/")) return true;
+        if (path.equals("/api/auth/login-url") || path.startsWith("/api/oauth2/")
+                || path.startsWith("/api/login/oauth2/")) return false;
         if (HttpMethod.GET.matches(request.getMethod()) || HttpMethod.HEAD.matches(request.getMethod())
                 || HttpMethod.OPTIONS.matches(request.getMethod())) return true;
         return !(path.startsWith("/api/files") || path.startsWith("/api/applications")

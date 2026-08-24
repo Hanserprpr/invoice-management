@@ -9,14 +9,14 @@ public final class ApiDocPaths {
 
     /** Spring Security 匹配用的路径模式。 */
     public static final List<String> PATTERNS = List.of(
-            "/v3/api-docs", "/v3/api-docs/**", "/v3/api-docs.yaml",
-            "/swagger-ui.html", "/swagger-ui/**");
+            "/api/v3/api-docs", "/api/v3/api-docs/**", "/api/v3/api-docs.yaml",
+            "/api/swagger-ui.html", "/api/swagger-ui/**");
 
     private ApiDocPaths() {
     }
 
     /** 判断请求路径是否属于接口文档，用于跳过租户等业务过滤器。 */
     public static boolean matches(String path) {
-        return path.startsWith("/v3/api-docs") || path.startsWith("/swagger-ui");
+        return path.startsWith("/api/v3/api-docs") || path.startsWith("/api/swagger-ui");
     }
 }
