@@ -160,9 +160,11 @@ public class FileObjectService {
         String casId = TenantContext.requireCasId();
         FileObject file = fileMapper.selectOne(new LambdaQueryWrapper<FileObject>()
                 .eq(FileObject::getOrganizationId, organizationId)
-                .eq(FileObject::getId, fileId)
-                .eq(FileObject::getUploaderCasId, casId));
-        if (file == null) throw new BusinessException(BizCode.FILE_NOT_FOUND, HttpStatus.NOT_FOUND);
+                .eq(FileObject::getId, fileId));
+        if (file == null || !casId.equals(file.getUploaderCasId())
+                && !authorizationService.isPlatformAdmin()) {
+            throw new BusinessException(BizCode.FILE_NOT_FOUND, HttpStatus.NOT_FOUND);
+        }
         return toVO(file);
     }
 

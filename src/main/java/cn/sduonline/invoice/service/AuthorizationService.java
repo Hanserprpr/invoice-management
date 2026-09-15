@@ -28,6 +28,9 @@ public class AuthorizationService {
     }
 
     public void requirePermission(String permission) {
+        if (isPlatformAdmin()) {
+            return;
+        }
         String organizationId = TenantContext.requireOrganizationId();
         String casId = TenantContext.requireCasId();
         if (!authorizationMapper.hasPermission(organizationId, casId, permission)) {
@@ -36,11 +39,17 @@ public class AuthorizationService {
     }
 
     public boolean hasPermission(String permission) {
+        if (isPlatformAdmin()) {
+            return true;
+        }
         return authorizationMapper.hasPermission(TenantContext.requireOrganizationId(),
                 TenantContext.requireCasId(), permission);
     }
 
     public boolean canReviewProject(String projectId) {
+        if (isPlatformAdmin()) {
+            return true;
+        }
         String organizationId = TenantContext.requireOrganizationId();
         String casId = TenantContext.requireCasId();
         return authorizationMapper.hasPermission(organizationId, casId, "application:review")
@@ -63,6 +72,9 @@ public class AuthorizationService {
     }
 
     public boolean isClubAdmin() {
+        if (isPlatformAdmin()) {
+            return true;
+        }
         return authorizationMapper.hasRole(TenantContext.requireOrganizationId(),
                 TenantContext.requireCasId(), "CLUB_ADMIN");
     }
@@ -75,6 +87,9 @@ public class AuthorizationService {
     }
 
     public boolean canManageProject(String projectId) {
+        if (isPlatformAdmin()) {
+            return true;
+        }
         String organizationId = TenantContext.requireOrganizationId();
         String casId = TenantContext.requireCasId();
         return authorizationMapper.hasRole(organizationId, casId, "CLUB_ADMIN")
@@ -83,6 +98,9 @@ public class AuthorizationService {
     }
 
     public boolean canViewProject(String projectId) {
+        if (isPlatformAdmin()) {
+            return true;
+        }
         String organizationId = TenantContext.requireOrganizationId();
         String casId = TenantContext.requireCasId();
         return authorizationMapper.hasRole(organizationId, casId, "CLUB_ADMIN")
@@ -104,5 +122,11 @@ public class AuthorizationService {
         if (!organizationId.equals(TenantContext.requireOrganizationId())) {
             throw new BusinessException(BizCode.CROSS_CLUB_FORBIDDEN, HttpStatus.FORBIDDEN);
         }
+    }
+
+    public boolean isPlatformAdmin() {
+        User user = userMapper.selectById(TenantContext.requireCasId());
+        return user != null && "ACTIVE".equals(user.getStatus())
+                && Boolean.TRUE.equals(user.getIsPlatformAdmin());
     }
 }

@@ -134,6 +134,44 @@ class ApiSecurityIntegrationTests {
 
     @Test
     @Transactional
+    void platformAdminEntersClubContextWithoutMembership() throws Exception {
+        jdbcTemplate.update("""
+                INSERT INTO `user`(cas_id,name,status,is_platform_admin) VALUES
+                ('pa-root','平台管理员','ACTIVE',TRUE),
+                ('pa-outsider','外部用户','ACTIVE',FALSE),
+                ('pa-disabled','停用管理员','DISABLED',TRUE)
+                """);
+        var organization = organizationService.create("pa-root",
+                new CreateOrganizationRequest("平台权限测试社团", "CLUB",
+                        new InitialAdmin("pa-club-admin", "社团管理员", null, null)));
+
+        mockMvc.perform(get("/api/organizations/{id}", organization.id())
+                        .header("X-Organization-Id", organization.id())
+                        .with(user("pa-root")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.id").value(organization.id()));
+
+        mockMvc.perform(get("/api/audit-logs")
+                        .header("X-Organization-Id", organization.id())
+                        .with(user("pa-root")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/api/audit-logs")
+                        .header("X-Organization-Id", organization.id())
+                        .with(user("pa-outsider")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(20004));
+
+        mockMvc.perform(get("/api/audit-logs")
+                        .header("X-Organization-Id", organization.id())
+                        .with(user("pa-disabled")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(20004));
+    }
+
+    @Test
+    @Transactional
     void clubAdminCreatesAndReadsProjectThroughHttpApi() throws Exception {
         jdbcTemplate.update("""
                 INSERT INTO `user`(cas_id,name,status,is_platform_admin)
