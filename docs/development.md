@@ -58,6 +58,17 @@ Swagger UI 上每个接口的摘要和详细说明直接来自控制器方法的
 
 ## API 约定
 
+### 写请求的 CSRF 令牌
+
+登录后，写请求必须携带会话 Cookie 和 `X-XSRF-TOKEN` 请求头。支持两种来源：
+
+- 同源前端读取 `XSRF-TOKEN` Cookie 的值并放入请求头。
+- 跨域前端携带凭据调用 `GET /api/auth/csrf`，把响应的 `data.token` 原样放入请求头；后续请求也必须携带凭据。该值经过编码，与 Cookie 原始值不同，两种格式均受支持。
+
+登录、退出或 Cookie 更新后，不应继续使用缓存的旧令牌。CSRF 校验失败返回 HTTP `403`、业务码 `20006`（安全校验失败，请刷新后重试）；角色权限不足仍返回 `20003`。不得通过关闭 CSRF 或增加管理员权限处理 `20006`。社团接口同时需要正确的 `X-Organization-Id`。
+
+### 接口列表
+
 - 当前用户：`GET /api/auth/me`
 - 当前用户社团：`GET /api/organizations`
 - 社团详情：`GET /api/organizations/{id}`

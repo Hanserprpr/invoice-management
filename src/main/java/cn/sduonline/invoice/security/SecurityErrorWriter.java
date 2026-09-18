@@ -9,6 +9,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.csrf.CsrfException;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -32,7 +33,9 @@ public class SecurityErrorWriter implements AuthenticationEntryPoint, AccessDeni
     public void handle(HttpServletRequest request, HttpServletResponse response,
                        org.springframework.security.access.AccessDeniedException accessDeniedException)
             throws IOException {
-        write(response, HttpServletResponse.SC_FORBIDDEN, BizCode.NO_PERMISSION);
+        write(response, HttpServletResponse.SC_FORBIDDEN,
+                accessDeniedException instanceof CsrfException
+                        ? BizCode.CSRF_TOKEN_INVALID : BizCode.NO_PERMISSION);
     }
 
     public void write(HttpServletResponse response, int status, BizCode code) throws IOException {

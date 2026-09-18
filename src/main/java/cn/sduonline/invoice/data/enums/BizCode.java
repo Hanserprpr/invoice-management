@@ -50,6 +50,8 @@ public enum BizCode {
     CROSS_CLUB_FORBIDDEN(20004, "无权访问其他社团数据"),
     /** 密码设置令牌无效或已过期。 */
     PASSWORD_SETUP_TOKEN_INVALID(20005, "密码设置链接无效或已过期"),
+    /** 写请求的 CSRF 令牌缺失或无效。 */
+    CSRF_TOKEN_INVALID(20006, "安全校验失败，请刷新后重试"),
 
     // ---------- 3xxxx 用户与社团成员 ----------
     /** 用户不存在。 */

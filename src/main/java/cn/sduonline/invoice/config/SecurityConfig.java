@@ -2,6 +2,7 @@ package cn.sduonline.invoice.config;
 
 import cn.sduonline.invoice.security.SduOidcUserService;
 import cn.sduonline.invoice.security.SecurityErrorWriter;
+import cn.sduonline.invoice.security.SpaCsrfTokenRequestHandler;
 import cn.sduonline.invoice.data.enums.BizCode;
 import cn.sduonline.invoice.tenant.TenantContextFilter;
 import cn.sduonline.invoice.security.RedisRateLimitFilter;
@@ -137,6 +138,7 @@ public class SecurityConfig {
                     CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
                     repository.setCookieCustomizer(cookie -> cookie.sameSite("None").secure(true));
                     csrf.csrfTokenRepository(repository);
+                    csrf.csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler());
                 })
                 .addFilterAfter(tenantContextFilter, AnonymousAuthenticationFilter.class)
                 .addFilterAfter(idempotencyFilter, TenantContextFilter.class)
